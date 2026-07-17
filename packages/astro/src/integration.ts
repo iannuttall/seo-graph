@@ -23,6 +23,13 @@ export interface AgentMarkdownIntegrationOptions {
   manifestFile?: string
   llmsTxt?: LlmsTxtConfig
   strict?: boolean
+  /**
+   * Append per-file rules for every generated `.md` route to the build's
+   * `_headers` file (Cloudflare/Netlify format): `Content-Type`, a
+   * canonical `Link`, `Vary: Accept`, and `X-Markdown-Tokens`. Enabled by
+   * default; pass `false` on hosts that don't read `_headers`.
+   */
+  cloudflareHeaders?: boolean
 }
 
 type BuildConfig = Pick<AstroConfig, 'base' | 'build' | 'output' | 'site'>
@@ -65,11 +72,15 @@ function assertCanonicalSite(canonical: URL, site: URL): void {
   }
 }
 
+const HEADERS_MARKER =
+  '# Generated agent markdown headers. Do not edit in build output.'
+
 export async function writeAgentMarkdownArtifacts(input: {
   base?: string
   excludeSelectors?: readonly string[]
   manifestFile?: string
   llmsTxt?: LlmsTxtConfig
+  cloudflareHeaders?: boolean
   outputDir: string
   site: string
 }): Promise<AgentRouteManifestEntry[]> {
@@ -177,6 +188,34 @@ export async function writeAgentMarkdownArtifacts(input: {
     )
   }
 
+  if (input.cloudflareHeaders !== false) {
+    const headersPath = resolve(outputDir, '_headers')
+    const existingRaw = (await exists(headersPath))
+      ? await readFile(headersPath, 'utf8')
+      : ''
+    // Idempotent: strip a previously generated section before appending so
+    // repeated runs produce identical bytes.
+    const markerIndex = existingRaw.indexOf(HEADERS_MARKER)
+    const existing = (
+      markerIndex === -1 ? existingRaw : existingRaw.slice(0, markerIndex)
+    ).trimEnd()
+    const rules = manifest.pages.map((page) =>
+      [
+        page.markdownPath,
+        '  ! Vary',
+        '  Content-Type: text/markdown; charset=utf-8',
+        `  Link: <${page.canonical}>; rel="canonical"`,
+        '  Vary: Accept',
+        `  X-Markdown-Tokens: ${page.tokens}`,
+      ].join('\n'),
+    )
+    await writeFile(
+      headersPath,
+      `${existing}${existing ? '\n\n' : ''}${HEADERS_MARKER}\n${rules.join('\n\n')}\n`,
+      'utf8',
+    )
+  }
+
   return prepared.map((item) => item.entry)
 }
 
@@ -205,6 +244,7 @@ export function agentMarkdown(
           excludeSelectors: options.excludeSelectors,
           manifestFile: options.manifestFile,
           llmsTxt: options.llmsTxt,
+          cloudflareHeaders: options.cloudflareHeaders,
           // Static builds emit HTML into the build dir itself; server and
           // hybrid builds put prerendered HTML in build.client.
           outputDir: fileURLToPath(

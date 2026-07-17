@@ -163,3 +163,56 @@ test('supports directory, file, and mixed static build layouts', async () => {
     await rm(directory, { force: true, recursive: true })
   }
 })
+
+test('appends idempotent per-file markdown headers to _headers', async () => {
+  const directory = await fixtureDirectory()
+  try {
+    await writeFile(
+      join(directory, '_headers'),
+      '/*\n  Vary: Accept\n',
+      'utf8',
+    )
+    await writeAgentMarkdownArtifacts({
+      outputDir: directory,
+      site: 'https://example.com',
+      llmsTxt,
+    })
+    const first = await readFile(join(directory, '_headers'), 'utf8')
+    assert.ok(first.startsWith('/*\n  Vary: Accept\n'))
+    assert.ok(first.includes('/index.md\n'))
+    assert.match(first, /X-Markdown-Tokens: \d+/)
+    assert.ok(
+      first.includes('Link: <https://example.com/>; rel="canonical"'),
+    )
+    await writeAgentMarkdownArtifacts({
+      outputDir: directory,
+      site: 'https://example.com',
+      llmsTxt,
+    })
+    const second = await readFile(join(directory, '_headers'), 'utf8')
+    assert.equal(second, first)
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
+})
+
+test('skips _headers emission when cloudflareHeaders is false', async () => {
+  const directory = await fixtureDirectory()
+  try {
+    await writeAgentMarkdownArtifacts({
+      cloudflareHeaders: false,
+      outputDir: directory,
+      site: 'https://example.com',
+      llmsTxt,
+    })
+    let found = true
+    try {
+      await readFile(join(directory, '_headers'), 'utf8')
+    } catch {
+      found = false
+    }
+    assert.equal(found, false)
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
+})

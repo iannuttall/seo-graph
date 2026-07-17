@@ -1,6 +1,6 @@
 {
   "name": "@iannuttall/seo-graph-astro",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Astro layer for @iannuttall/seo-graph-core: build integration for agent markdown + llms.txt + manifests, collection markdown endpoints, schema endpoints, IndexNow key route, Cloudflare content negotiation.",
   "license": "MIT",
   "type": "module",

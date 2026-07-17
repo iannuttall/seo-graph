@@ -2331,6 +2331,19 @@ Guarantees:
 - **Token estimate** is `ceil(UTF-8 bytes / 4)`, exposed as the
   `X-Markdown-Tokens` response header and stored in the manifest.
 
+### Dynamic pages
+
+A page whose visible values load client-side will bake its **loading state**
+into the built HTML — and therefore into the Markdown twin (zeros,
+"Loading…"), which actively misinforms agents. The rule for any dynamic
+page: fetch a snapshot of the data at build time and render it into the
+static HTML (the client script then refreshes to live values on load), and
+include a visible note that names it a snapshot and points agents at the
+live endpoint, e.g. "Snapshot from 17 Jul 2026, 12:20 UTC. Counts refresh
+live in the browser; agents can fetch current values as JSON from
+/api/stats." Snapshot-at-build is better than nothing; a lying zero is
+worse than nothing.
+
 ## The content selection contract
 
 Deliberately small — do not invent a broad annotation DSL:

@@ -187,20 +187,17 @@ export function agentMarkdown(
   let config: BuildConfig | undefined
 
   return {
-    name: '@seo/astro',
+    name: '@iannuttall/seo-graph-astro',
     hooks: {
       'astro:config:done': ({ config: resolvedConfig }) => {
-        if (strict && resolvedConfig.output !== 'static') {
-          throw new Error('@seo/astro currently requires static output')
-        }
         if (strict && !resolvedConfig.site) {
-          throw new Error('@seo/astro requires a configured site URL')
+          throw new Error('@iannuttall/seo-graph-astro requires a configured site URL')
         }
         config = resolvedConfig
       },
       'astro:build:done': async ({ dir, logger }) => {
         if (!config?.site) {
-          if (strict) throw new Error('@seo/astro did not receive a site URL')
+          if (strict) throw new Error('@iannuttall/seo-graph-astro did not receive a site URL')
           return
         }
         const pages = await writeAgentMarkdownArtifacts({
@@ -208,7 +205,11 @@ export function agentMarkdown(
           excludeSelectors: options.excludeSelectors,
           manifestFile: options.manifestFile,
           llmsTxt: options.llmsTxt,
-          outputDir: fileURLToPath(dir),
+          // Static builds emit HTML into the build dir itself; server and
+          // hybrid builds put prerendered HTML in build.client.
+          outputDir: fileURLToPath(
+            config.output === 'static' ? dir : config.build.client,
+          ),
           site: config.site.toString(),
         })
         logger.info(`Generated ${pages.length} Markdown alternatives.`)

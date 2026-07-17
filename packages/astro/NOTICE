@@ -1,0 +1,13 @@
+This project includes code derived from seo-graph
+(https://github.com/jdevalk/seo-graph), Copyright (c) Joost de Valk,
+licensed under the MIT License.
+
+Derived portions include the schema.org graph builders and assembler
+(packages/core/src/schema/), the collection markdown alternate renderer,
+aggregator, git-lastmod, IndexNow, content helpers, schema endpoint
+factories, and API catalog modules, along with their tests.
+
+The remainder of the codebase (the built-HTML agent markdown pipeline,
+route mapping, manifests, llms.txt generation, Astro build integration,
+and Cloudflare content-negotiation handler) is original work by Ian
+Nuttall, first developed for seoskill.dev.

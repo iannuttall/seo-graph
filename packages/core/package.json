@@ -1,0 +1,35 @@
+{
+  "name": "@iannuttall/seo-graph-core",
+  "version": "0.0.1",
+  "description": "Runtime-agnostic core for agent-ready SEO: built-HTML and collection markdown rendering, schema.org graph builders, manifests, llms.txt, IndexNow.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "NOTICE"],
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "build": "pnpm run clean && tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { force: true, recursive: true })\"",
+    "test": "vitest run test/ && node --test \"dist/**/*.test.js\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "linkedom": "0.18.13",
+    "schema-dts": "^2.0.0",
+    "turndown": "7.2.4",
+    "turndown-plugin-gfm": "1.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "@types/turndown": "5.0.6",
+    "typescript": "6.0.3",
+    "vitest": "^4.1.9"
+  }
+}

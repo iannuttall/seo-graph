@@ -1,0 +1,44 @@
+{
+  "name": "@iannuttall/seo-graph-astro",
+  "version": "0.0.1",
+  "description": "Astro layer for @iannuttall/seo-graph-core: build integration for agent markdown + llms.txt + manifests, collection markdown endpoints, schema endpoints, IndexNow key route, Cloudflare content negotiation.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./cloudflare": {
+      "types": "./dist/cloudflare.d.ts",
+      "import": "./dist/cloudflare.js"
+    }
+  },
+  "files": ["dist", "NOTICE"],
+  "publishConfig": { "access": "public" },
+  "peerDependencies": {
+    "astro": ">=7.0.0 <8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "astro": { "optional": true }
+  },
+  "scripts": {
+    "build": "pnpm run clean && tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { force: true, recursive: true })\"",
+    "test": "vitest run test/ && node --test \"dist/**/*.test.js\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@iannuttall/seo-graph-core": "workspace:*",
+    "schema-dts": "^2.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "astro": "7.0.7",
+    "typescript": "6.0.3",
+    "vitest": "^4.1.9"
+  }
+}

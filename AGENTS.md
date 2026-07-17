@@ -2334,15 +2334,26 @@ Guarantees:
 ### Dynamic pages
 
 A page whose visible values load client-side will bake its **loading state**
-into the built HTML — and therefore into the Markdown twin (zeros,
-"Loading…"), which actively misinforms agents. The rule for any dynamic
-page: fetch a snapshot of the data at build time and render it into the
-static HTML (the client script then refreshes to live values on load), and
-include a visible note that names it a snapshot and points agents at the
-live endpoint, e.g. "Snapshot from 17 Jul 2026, 12:20 UTC. Counts refresh
-live in the browser; agents can fetch current values as JSON from
-/api/stats." Snapshot-at-build is better than nothing; a lying zero is
-worse than nothing.
+into built HTML — and therefore into a build-time Markdown twin (zeros,
+"Loading…"), which misinforms agents. This library is deliberately agnostic
+about how an app resolves that; it only supplies the mechanisms. The app
+chooses per page:
+
+- **Exclude and point at the API** — wrap the dynamic sections in
+  `data-agent-markdown="exclude"` and include visible copy telling agents
+  where to fetch live values (e.g. "Agents can fetch current values as JSON
+  from /api/stats"). Zero maintenance; the Markdown describes the page and
+  delegates the data.
+- **Render at request time** — serve the page (or just its Markdown) SSR
+  with `createMarkdownEndpoint` / `renderMarkdownAlternate`, and negotiate
+  with `createCloudflareMarkdownHandler` if a Worker fronts traffic. The
+  Markdown is always live; the app pays request-time compute.
+- **Snapshot** — commit or generate the data before the build and render it
+  statically, with copy noting when the snapshot was taken. Deterministic
+  per commit; freshness is tied to whatever refreshes the snapshot.
+
+Whatever the choice, the invariant is the same: the Markdown an agent reads
+must never present placeholder state as real data.
 
 ## The content selection contract
 

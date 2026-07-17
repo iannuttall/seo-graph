@@ -1,6 +1,6 @@
 {
   "name": "@iannuttall/seo-graph-core",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Runtime-agnostic core for agent-ready SEO: built-HTML and collection markdown rendering, schema.org graph builders, manifests, llms.txt, IndexNow.",
   "license": "MIT",
   "type": "module",

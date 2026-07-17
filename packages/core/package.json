@@ -12,8 +12,13 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "NOTICE"],
-  "publishConfig": { "access": "public" },
+  "files": [
+    "dist",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "pnpm run clean && tsc -p tsconfig.json",
     "clean": "node -e \"require('node:fs').rmSync('dist', { force: true, recursive: true })\"",
@@ -31,5 +36,14 @@
     "@types/turndown": "5.0.6",
     "typescript": "6.0.3",
     "vitest": "^4.1.9"
-  }
+  },
+  "author": "Ian Nuttall",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iannuttall/seo-graph.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/iannuttall/seo-graph/tree/main/packages/core#readme",
+  "bugs": "https://github.com/iannuttall/seo-graph/issues",
+  "funding": "https://github.com/iannuttall"
 }

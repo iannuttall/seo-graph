@@ -2,12 +2,15 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+    paths:
+      - "packages/**"
+      - ".github/workflows/release.yml"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   # Required for npm trusted publishing (OIDC).
   id-token: write
 
@@ -30,4 +33,26 @@ jobs:
 
       - run: pnpm test
 
-      - run: pnpm -r publish --access public --no-git-checks
+      # Publish any package whose package.json version is not on npm yet,
+      # then tag and create a GitHub release for it. Core publishes before
+      # astro so the workspace dependency always resolves for consumers.
+      - name: Publish changed versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for dir in packages/core packages/astro; do
+            name=$(node -p "require('./$dir/package.json').name")
+            version=$(node -p "require('./$dir/package.json').version")
+            short="${name#@iannuttall/}"
+            tag="$short@$version"
+            if npm view "$name@$version" version > /dev/null 2>&1; then
+              echo "$name@$version already on npm — skipping"
+              continue
+            fi
+            echo "Publishing $name@$version"
+            (cd "$dir" && pnpm publish --access public --no-git-checks)
+            git tag "$tag"
+            git push origin "$tag"
+            gh release create "$tag" --title "$tag" --generate-notes || true
+          done

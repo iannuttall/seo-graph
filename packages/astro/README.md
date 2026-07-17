@@ -8,6 +8,8 @@ Astro layer for
 - `agentMarkdown()` — build integration emitting a deterministic `.md` twin
   for every indexable page, `agent-routes.json`, `llms.txt`, and injected
   `<link rel="alternate" type="text/markdown">` tags.
+- `agentMarkdownMiddleware()` — live Markdown twins for `prerender = false`
+  pages, inheriting the page's render mode automatically.
 - `createMarkdownEndpoint()` — serve collection pages' Markdown from the
   source entry.
 - `createSchemaEndpoint()` / `createSchemaMap()` — corpus-wide JSON-LD

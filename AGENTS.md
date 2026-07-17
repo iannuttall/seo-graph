@@ -65,6 +65,7 @@ The agent-markdown pipeline is original work first built for
 - [The agent markdown pipeline](#the-agent-markdown-pipeline)
 - [The content selection contract](#the-content-selection-contract)
 - [Astro build integration](#astro-build-integration)
+- [Live markdown for server-rendered pages](#live-markdown-for-server-rendered-pages)
 - [Collection markdown endpoints](#collection-markdown-endpoints)
 - [Cloudflare content negotiation](#cloudflare-content-negotiation)
 
@@ -2344,10 +2345,13 @@ chooses per page:
   where to fetch live values (e.g. "Agents can fetch current values as JSON
   from /api/stats"). Zero maintenance; the Markdown describes the page and
   delegates the data.
-- **Render at request time** — serve the page (or just its Markdown) SSR
-  with `createMarkdownEndpoint` / `renderMarkdownAlternate`, and negotiate
-  with `createCloudflareMarkdownHandler` if a Worker fronts traffic. The
-  Markdown is always live; the app pays request-time compute.
+- **Render at request time** — flip the page to `prerender = false` and add
+  `agentMarkdownMiddleware()` (see below): the Markdown twin automatically
+  becomes live with no per-page routes. For collection-backed content,
+  `createMarkdownEndpoint` / `renderMarkdownAlternate` serve source-exact
+  Markdown instead, and `createCloudflareMarkdownHandler` negotiates if a
+  Worker fronts traffic. The Markdown is always live; the app pays
+  request-time compute.
 - **Snapshot** — commit or generate the data before the build and render it
   statically, with copy noting when the snapshot was taken. Deterministic
   per commit; freshness is tied to whatever refreshes the snapshot.
@@ -2404,6 +2408,32 @@ export default defineConfig({
 
 Noindex pages and redirect pages are skipped; the Markdown twin of a page
 shares its canonical URL.
+
+## Live markdown for server-rendered pages
+
+`agentMarkdownMiddleware()` makes a page's Markdown twin inherit the page's
+render mode with zero per-page configuration:
+
+```ts
+// src/middleware.ts
+import { agentMarkdownMiddleware } from '@iannuttall/seo-graph-astro'
+
+export const onRequest = agentMarkdownMiddleware()
+```
+
+- Prerendered pages get static `.md` twins from `agentMarkdown()` and are
+  served from assets; the middleware never sees them in production.
+- A `prerender = false` page emits no build twin, so `<page>.md` reaches
+  the app, 404s, and the middleware maps it back to the HTML route, renders
+  it live via `context.rewrite`, and converts it with the exact same
+  contract as the build pipeline. Same exclusions, frontmatter, and token
+  estimate; `Cache-Control` mirrors the HTML route's.
+- App routes always win: any route that answers a `.md` path itself (for
+  example a `createMarkdownEndpoint` route) is never shadowed.
+- Server-rendered HTML responses get the alternate `Link` header and
+  `Vary: Accept` that build-time injection cannot provide.
+
+Flip one flag on a page and every representation follows.
 
 ## Collection markdown endpoints
 

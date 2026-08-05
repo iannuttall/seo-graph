@@ -1,6 +1,6 @@
 {
   "name": "@iannuttall/seo-graph-astro",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Astro layer for @iannuttall/seo-graph-core: build integration for agent markdown + llms.txt + manifests, collection markdown endpoints, schema endpoints, IndexNow key route, Cloudflare content negotiation.",
   "license": "MIT",
   "type": "module",
@@ -34,7 +34,7 @@
   "scripts": {
     "build": "pnpm run clean && tsc -p tsconfig.json",
     "clean": "node -e \"require('node:fs').rmSync('dist', { force: true, recursive: true })\"",
-    "test": "vitest run test/ && node --test \"dist/**/*.test.js\"",
+    "test": "vitest run test/",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

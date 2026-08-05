@@ -4,6 +4,7 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "rootDir": "src",
     "outDir": "dist",
+    "inlineSources": true,
     "tsBuildInfoFile": "dist/.tsbuildinfo",
     "types": ["node"]
   },

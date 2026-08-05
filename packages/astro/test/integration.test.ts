@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { test } from 'node:test'
-import { writeAgentMarkdownArtifacts } from './integration.js'
+import { test } from 'vitest'
+import { writeAgentMarkdownArtifacts } from '../src/integration.js'
 
 const llmsTxt = {
   title: 'Example',

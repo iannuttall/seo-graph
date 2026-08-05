@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { test } from 'vitest'
 import {
   acceptsMarkdown,
   createCloudflareMarkdownHandler,
   parseAccept,
-} from './cloudflare.js'
+} from '../src/cloudflare.js'
 
 const markdown = '# Docs\n\nUseful docs.\n'
 const markdownBytes = Buffer.byteLength(markdown)

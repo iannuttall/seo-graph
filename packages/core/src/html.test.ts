@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   canonicalFromHtml,
+  injectAgentDiscoveryLinks,
   injectMarkdownAlternate,
   isNoindexHtml,
   isRedirectHtml,
@@ -43,4 +44,18 @@ test('fails rather than emitting an undiscoverable alternate', () => {
     () => injectMarkdownAlternate('<html><body></body></html>', '/page.md'),
     /without <\/head>/u,
   )
+})
+
+test('injects one scoped llms.txt describedby link idempotently', () => {
+  const original = '<html><head></head><body></body></html>'
+  const links = {
+    markdownUrl: 'https://example.com/docs/page.md',
+    llmsTxtUrl: 'https://example.com/docs/llms.txt',
+  }
+  const once = injectAgentDiscoveryLinks(original, links)
+  const twice = injectAgentDiscoveryLinks(once, links)
+
+  assert.equal(twice, once)
+  assert.equal((once.match(/rel="describedby"/gu) ?? []).length, 1)
+  assert.match(once, /href="https:\/\/example\.com\/docs\/llms\.txt"/u)
 })

@@ -197,14 +197,20 @@ describe('createMarkdownEndpoint', () => {
     }
 
     it('returns 200 with correct headers and rendered body on a happy path', async () => {
-        const GET = createMarkdownEndpoint<Post>(base);
+        const GET = createMarkdownEndpoint<Post>({
+            ...base,
+            describedBy: 'https://ex.com/llms.txt',
+        });
         const res = await call(GET, 'hello');
         expect(res.status).toBe(200);
         expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
         expect(res.headers.get('Cache-Control')).toBe('max-age=300');
         expect(res.headers.get('X-Robots-Tag')).toBe('noindex, follow');
         expect(res.headers.get('X-Markdown-Tokens')).toMatch(/^\d+$/);
-        expect(res.headers.get('Link')).toBe('<https://ex.com/hello/>; rel="canonical"');
+        expect(res.headers.get('Link')).toContain('<https://ex.com/hello/>; rel="canonical"');
+        expect(res.headers.get('Link')).toContain(
+            '<https://ex.com/llms.txt>; rel="describedby"',
+        );
         expect(await res.text()).toContain('Hello body.');
     });
 

@@ -29,6 +29,8 @@ export interface MarkdownEndpointOptions<Entry> {
     emitTokenHeader?: boolean;
     /** Extra response headers. Caller wins on key conflicts. */
     extraHeaders?: Record<string, string>;
+    /** Optional llms.txt URL for a `rel="describedby"` Link value. */
+    describedBy?: string | URL;
 }
 
 /**
@@ -93,7 +95,12 @@ export function createMarkdownEndpoint<Entry>(options: MarkdownEndpointOptions<E
         // Point crawlers at the HTML canonical — the .md URL is a
         // machine-readable alternate, not a separately indexable resource.
         const canonical = rendered.canonicalHref;
-        if (canonical) headers['Link'] = `<${canonical}>; rel="canonical"`;
+        const linkValues: string[] = [];
+        if (canonical) linkValues.push(`<${canonical}>; rel="canonical"`);
+        if (options.describedBy) {
+            linkValues.push(`<${options.describedBy}>; rel="describedby"`);
+        }
+        if (linkValues.length > 0) headers['Link'] = linkValues.join(', ');
         if (options.extraHeaders) {
             for (const [k, v] of Object.entries(options.extraHeaders)) headers[k] = v;
         }

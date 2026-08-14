@@ -2383,8 +2383,10 @@ presentation markup leaking into what agents read.
 
 `agentMarkdown()` from `@iannuttall/seo-graph-astro` runs at
 `astro:build:done`, walks the built HTML, and emits one `.md` file per
-indexable page, an `agent-routes.json` manifest, and `llms.txt`. It also
+content page, an `agent-routes.json` manifest, and `llms.txt`. It also
 injects `<link rel="alternate" type="text/markdown">` into each HTML page.
+When `llmsTxt` is configured, covered pages also get
+`<link rel="describedby" href=".../llms.txt">`.
 
 ```js
 // astro.config.mjs
@@ -2401,13 +2403,18 @@ export default defineConfig({
                 title: 'Example',
                 summary: 'What this site is about, one line.',
             },
+            // Opt in to live twins and Accept negotiation on any Astro adapter.
+            // Static-only sites can leave this false and pay no runtime cost.
+            // runtimeMiddleware: true,
+            // Optional convenience export; not part of the llms.txt v2 proposal.
+            // llmsFullTxt: true,
         }),
     ],
 });
 ```
 
-Noindex pages and redirect pages are skipped; the Markdown twin of a page
-shares its canonical URL.
+Status and redirect pages are skipped. A noindex page keeps noindex on its
+Markdown response. The Markdown twin of a page shares its canonical URL.
 
 ## Live markdown for server-rendered pages
 
@@ -2420,6 +2427,20 @@ import { agentMarkdownMiddleware } from '@iannuttall/seo-graph-astro'
 
 export const onRequest = agentMarkdownMiddleware()
 ```
+
+Canonical URL content negotiation is opt-in and works on any Astro adapter:
+
+```ts
+export const onRequest = agentMarkdownMiddleware({
+    contentNegotiation: true,
+    llmsTxtPath: '/llms.txt',
+})
+```
+
+When `Accept: text/markdown` has a higher quality than `text/html`, the
+middleware returns Markdown at the requested canonical URL. It does not
+redirect. The response has `Vary: Accept`. This option defaults to `false`, so
+existing sites and static-only deployments do not add runtime work.
 
 - Prerendered pages get static `.md` twins from `agentMarkdown()` and are
   served from assets; the middleware never sees them in production.
@@ -2445,6 +2466,7 @@ conversion artifacts:
 // src/pages/blog/[...slug].md.ts
 import { getCollection } from 'astro:content';
 import { createMarkdownEndpoint } from '@iannuttall/seo-graph-astro';
+import { cleanMdx } from '@iannuttall/seo-graph-core';
 
 export const GET = createMarkdownEndpoint({
     entries: () => getCollection('blog'),
@@ -2457,15 +2479,32 @@ export const GET = createMarkdownEndpoint({
                       canonical: `https://example.com/blog/${entry.id}`,
                   },
                   body: entry.body ?? '',
+                  transformBody: cleanMdx,
               }
             : null,
+    describedBy: 'https://example.com/llms.txt',
 });
 ```
 
 Options: `paramName` (default `'slug'`), `cacheControl` (default
-`max-age=300`), `contentType`, `emitTokenHeader`, `extraHeaders`. The pure
-renderer `renderMarkdownAlternate` and `deriveMdUrl` live in core for
-non-Astro callers.
+`max-age=300`), `contentType`, `emitTokenHeader`, `describedBy`,
+`extraHeaders`. The pure renderer `renderMarkdownAlternate`, `deriveMdUrl`,
+and code-safe `cleanMdx` live in core for non-Astro callers.
+
+For custom pages, `md` is a tagged template that returns a Markdown response.
+Use `md.string`, `md.link`, `md.heading`, and `md.section` to compose text.
+Use `markdownResponse(body, options)` when you need canonical, describedby,
+noindex, cache, or custom headers.
+
+```ts
+import { md } from '@iannuttall/seo-graph-astro'
+
+export const GET = () => md`
+    # Resources
+
+    ${resources.map((item) => md.link(item.title, item.url))}
+`
+```
 
 ## Cloudflare content negotiation
 
@@ -2479,6 +2518,7 @@ import { createCloudflareMarkdownHandler } from '@iannuttall/seo-graph-astro/clo
 
 const markdown = createCloudflareMarkdownHandler({
     site: 'https://example.com',
+    llmsTxtPath: '/llms.txt',
     contentSignal: 'search=yes, ai-input=yes, ai-train=yes',
 });
 ```
@@ -2487,7 +2527,7 @@ It does full RFC 9110 Accept parsing (q-values, specificity; `q=0` refuses
 markdown, `*/*` gets HTML), adds `Vary: Accept`, canonical/alternate `Link`
 headers, `X-Markdown-Tokens`, your `Content-Signal`, and preserves noindex
 as `X-Robots-Tag`. Options: `base`, `canonicalHosts`, `noindexPaths`,
-`ignoredMarkdownPrefixes`, `responseHeaders`.
+`ignoredMarkdownPrefixes`, `llmsTxtPath`, `responseHeaders`.
 
 ## Schema endpoints and the schema map
 
@@ -2524,6 +2564,14 @@ engine (in core) walks entries, runs your mapper, and dedupes by `@id`.
 
 - **`llms.txt`** — curated sections via `llmsTxt.sections`, or an
   auto-generated page list from the build output. Deterministic ordering.
+- **Scoped output** — set `llmsTxt.outputPath` to `/docs/llms.txt`; only pages
+  under `/docs` enter the automatic list and get `rel="describedby"`.
+- **Composition** — `llmsTxt.details` adds free-form Markdown after the
+  summary. Set `autoSection` to add unlisted manifest pages before or after
+  manual sections. Explicit sections keep their previous output bytes.
+- **`llms-full.txt`** — set `llmsFullTxt: true` for an optional one-file
+  export of the selected internal pages. It is off by default and is not part
+  of the llms.txt v2 proposal.
 - **`agent-routes.json`** — every HTML route and its Markdown twin with
   per-page sha256 and token counts, so parity between representations is
   provable rather than assumed.

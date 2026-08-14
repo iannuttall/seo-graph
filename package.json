@@ -6,7 +6,7 @@
   "license": "MIT",
   "scripts": {
     "build": "pnpm -r build",
-    "test": "pnpm -r test",
+    "test": "pnpm build && pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   },
   "packageManager": "pnpm@11.8.0"

@@ -6,12 +6,14 @@ Astro layer for
 [`@iannuttall/seo-graph-core`](https://www.npmjs.com/package/@iannuttall/seo-graph-core):
 
 - `agentMarkdown()` — build integration emitting a deterministic `.md` twin
-  for every indexable page, `agent-routes.json`, `llms.txt`, and injected
-  `<link rel="alternate" type="text/markdown">` tags.
+  for every built content page, `agent-routes.json`, `llms.txt`, and injected
+  alternate and `llms.txt` discovery links. Scoped `llms.txt` and an optional
+  `llms-full.txt` export are supported.
 - `agentMarkdownMiddleware()` — live Markdown twins for `prerender = false`
-  pages, inheriting the page's render mode automatically.
+  pages and opt-in `Accept: text/markdown` negotiation on any Astro adapter.
 - `createMarkdownEndpoint()` — serve collection pages' Markdown from the
   source entry.
+- `md` / `markdownResponse()` — small helpers for custom Markdown routes.
 - `createSchemaEndpoint()` / `createSchemaMap()` — corpus-wide JSON-LD
   `@graph` endpoints and their discovery map.
 - `createIndexNowKeyRoute()` + `indexNowOnBranch()` — IndexNow with
@@ -21,6 +23,11 @@ Astro layer for
 - `@iannuttall/seo-graph-astro/cloudflare` —
   `createCloudflareMarkdownHandler()`, RFC 9110 `Accept: text/markdown`
   negotiation at canonical URLs for Cloudflare Workers.
+
+Runtime negotiation is off by default. Static sites keep their current build
+and hosting behavior. Enable the default package middleware with
+`agentMarkdown({ runtimeMiddleware: true })`, or configure
+`agentMarkdownMiddleware({ contentNegotiation: true })` in `src/middleware.ts`.
 
 ```sh
 pnpm add @iannuttall/seo-graph-astro @iannuttall/seo-graph-core

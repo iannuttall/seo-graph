@@ -1,4 +1,13 @@
-import { htmlPathForMarkdownPath, markdownRouteForPath } from '@iannuttall/seo-graph-core'
+import {
+  acceptsMarkdown,
+  htmlPathForMarkdownPath,
+  llmsTxtCoversPath,
+  markdownRouteForPath,
+  normalizeLlmsTxtPath,
+  parseAccept,
+} from '@iannuttall/seo-graph-core'
+
+export { acceptsMarkdown, parseAccept }
 
 export interface AssetFetcher {
   fetch(request: Request): Promise<Response>
@@ -9,112 +18,14 @@ export interface CloudflareMarkdownOptions {
   canonicalHosts?: readonly string[]
   contentSignal?: string
   ignoredMarkdownPrefixes?: readonly string[]
+  /** Public llms.txt path used for `rel="describedby"` discovery. */
+  llmsTxtPath?: string
   noindexPaths?: readonly string[]
   responseHeaders?: Readonly<Record<string, string>>
   site: string
 }
 
-interface MediaRange {
-  order: number
-  quality: number
-  subtype: string
-  type: string
-}
-
 const defaultIgnoredMarkdownPrefixes = ['/.well-known/'] as const
-
-function splitHeader(value: string, separator: string): string[] {
-  const parts: string[] = []
-  let current = ''
-  let quoted = false
-
-  for (const character of value) {
-    if (character === '"') quoted = !quoted
-    if (character === separator && !quoted) {
-      parts.push(current)
-      current = ''
-    } else {
-      current += character
-    }
-  }
-  parts.push(current)
-  return parts
-}
-
-function parseQuality(value: string | undefined): number {
-  if (!value) return 1
-  const normalized = value.trim().replace(/^"|"$/gu, '')
-  if (!/^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/u.test(normalized)) return 0
-  return Number(normalized)
-}
-
-export function parseAccept(value: string | null): MediaRange[] {
-  if (!value) return []
-
-  return splitHeader(value, ',')
-    .map((part, order): MediaRange | undefined => {
-      const [mediaRange, ...parameters] = splitHeader(part, ';')
-      const mediaParts = (mediaRange ?? '').trim().toLowerCase().split('/')
-      if (mediaParts.length !== 2) return undefined
-      const [type, subtype] = mediaParts
-      if (!type || !subtype) return undefined
-      const qualityParameters = parameters.filter((parameter) =>
-        /^\s*q\s*=/iu.test(parameter),
-      )
-      const quality =
-        qualityParameters.length > 1
-          ? 0
-          : parseQuality(qualityParameters[0]?.split('=', 2)[1])
-      return { order, quality, subtype, type }
-    })
-    .filter((range): range is MediaRange => Boolean(range))
-}
-
-function mediaRangeSpecificity(
-  range: MediaRange,
-  type: string,
-  subtype: string,
-): number {
-  if (range.type === type && range.subtype === subtype) return 2
-  if (range.type === type && range.subtype === '*') return 1
-  if (range.type === '*' && range.subtype === '*') return 0
-  return -1
-}
-
-function qualityFor(
-  ranges: readonly MediaRange[],
-  type: string,
-  subtype: string,
-): number {
-  const candidates = ranges
-    .map((range) => ({
-      ...range,
-      specificity: mediaRangeSpecificity(range, type, subtype),
-    }))
-    .filter((range) => range.specificity >= 0)
-    .sort(
-      (left, right) =>
-        right.specificity - left.specificity ||
-        right.quality - left.quality ||
-        left.order - right.order,
-    )
-  return candidates[0]?.quality ?? 0
-}
-
-export function acceptsMarkdown(value: string | null): boolean {
-  const ranges = parseAccept(value)
-  const explicitMarkdown = ranges.some(
-    (range) =>
-      range.type === 'text' &&
-      range.subtype === 'markdown' &&
-      range.quality > 0,
-  )
-  if (!explicitMarkdown) return false
-
-  const markdownQuality = qualityFor(ranges, 'text', 'markdown')
-  const htmlQuality = qualityFor(ranges, 'text', 'html')
-  return markdownQuality > htmlQuality
-}
 
 function mergeVary(headers: Headers, value: string): void {
   const values = (headers.get('Vary') ?? '')
@@ -202,6 +113,7 @@ function canonicalUrl(site: URL, path: string): string {
 async function markdownResponse(input: {
   canonical: string
   contentSignal?: string
+  describedBy?: string
   request: Request
   responseHeaders?: Readonly<Record<string, string>>
   response: Response
@@ -214,6 +126,9 @@ async function markdownResponse(input: {
 
   headers.set('Content-Type', 'text/markdown; charset=utf-8')
   appendLink(headers, `<${input.canonical}>; rel="canonical"`)
+  if (input.describedBy) {
+    appendLink(headers, `<${input.describedBy}>; rel="describedby"`)
+  }
   if (!headers.has('X-Markdown-Tokens')) {
     const contentRange = headers.get('Content-Range')
     const rangeTotal = contentRange?.match(/\/(\d+)$/u)?.[1]
@@ -250,6 +165,13 @@ export function createCloudflareMarkdownHandler(
   const ignoredPrefixes =
     options.ignoredMarkdownPrefixes ?? defaultIgnoredMarkdownPrefixes
   const noindexPaths = new Set(options.noindexPaths ?? [])
+  const llmsTxtPath = options.llmsTxtPath
+    ? normalizeLlmsTxtPath(options.llmsTxtPath)
+    : undefined
+  const describedBy = (pathname: string): string | undefined =>
+    llmsTxtPath && llmsTxtCoversPath(llmsTxtPath, pathname)
+      ? canonicalUrl(site, llmsTxtPath)
+      : undefined
 
   return async (request, assets) => {
     const requestUrl = new URL(request.url)
@@ -289,6 +211,7 @@ export function createCloudflareMarkdownHandler(
       const result = await markdownResponse({
         canonical: canonicalUrl(site, htmlPath),
         contentSignal: options.contentSignal,
+        describedBy: describedBy(htmlPath),
         responseHeaders: options.responseHeaders,
         response,
         request,
@@ -310,6 +233,7 @@ export function createCloudflareMarkdownHandler(
         const result = await markdownResponse({
           canonical: canonicalUrl(site, requestUrl.pathname),
           contentSignal: options.contentSignal,
+          describedBy: describedBy(requestUrl.pathname),
           responseHeaders: options.responseHeaders,
           response,
           request,
@@ -333,6 +257,10 @@ export function createCloudflareMarkdownHandler(
         headers,
         `<${canonicalUrl(site, markdownRouteForPath(requestUrl.pathname, options.base).markdownPath)}>; rel="alternate"; type="text/markdown"`,
       )
+      const llmsUrl = describedBy(requestUrl.pathname)
+      if (llmsUrl) {
+        appendLink(headers, `<${llmsUrl}>; rel="describedby"`)
+      }
       if (options.contentSignal) {
         headers.set('Content-Signal', options.contentSignal)
       }

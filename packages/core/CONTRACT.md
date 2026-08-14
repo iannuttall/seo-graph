@@ -28,6 +28,8 @@ chrome are deliberately lost.
 - The token estimate is `ceil(UTF-8 bytes / 4)` and is exposed as
   `X-Markdown-Tokens`.
 - Indexable HTML and Markdown representations share one canonical URL.
+- `rel="alternate"` finds the Markdown representation. When configured,
+  `rel="describedby"` finds the nearest scoped `llms.txt` file.
 - A Markdown representation of an existing noindex page remains noindex at the
   HTTP layer.
 - Content Signals default to `search=yes, ai-input=yes, ai-train=no` and are overridable via `contentSignal`.

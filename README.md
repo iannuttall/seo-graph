@@ -16,8 +16,8 @@ agents.
 
 | Package | Purpose |
 | --- | --- |
-| [`@iannuttall/seo-graph-core`](./packages/core) | Pure, runtime-agnostic core. Schema piece builders and graph assembler (typed by [`schema-dts`](https://github.com/google/schema-dts)), the built-HTML → Markdown renderer with a strict content-selection contract, collection markdown rendering, route mapping, manifests, `llms.txt`, git-based lastmod, IndexNow hashing. |
-| [`@iannuttall/seo-graph-astro`](./packages/astro) | Astro layer. `agentMarkdown()` build integration, collection markdown endpoints, schema endpoints + schema map, IndexNow key route, RFC 9727 api-catalog, Zod content helpers, and a Cloudflare Worker content-negotiation handler (`./cloudflare`). |
+| [`@iannuttall/seo-graph-core`](./packages/core) | Pure, runtime-agnostic core. Schema piece builders and graph assembler (typed by [`schema-dts`](https://github.com/google/schema-dts)), the built-HTML → Markdown renderer with a strict content-selection contract, MDX cleaning, route mapping, manifests, `llms.txt`, optional `llms-full.txt`, git-based lastmod, and IndexNow hashing. |
+| [`@iannuttall/seo-graph-astro`](./packages/astro) | Astro layer. `agentMarkdown()` build integration, opt-in generic content negotiation, Markdown response and collection helpers, schema endpoints + schema map, IndexNow key route, RFC 9727 api-catalog, Zod content helpers, and a static-asset Cloudflare handler (`./cloudflare`). |
 
 ## Why not convert HTML at the edge?
 
@@ -49,7 +49,16 @@ import { agentMarkdown } from '@iannuttall/seo-graph-astro';
 
 export default defineConfig({
     site: 'https://example.com',
-    integrations: [agentMarkdown({ llmsTxt: { title: 'Example' } })],
+    integrations: [
+        agentMarkdown({
+            llmsTxt: {
+                title: 'Example',
+                summary: 'Useful pages from Example.',
+            },
+            // Optional. Defaults to false, so static sites keep no runtime cost.
+            // runtimeMiddleware: true,
+        }),
+    ],
 });
 ```
 

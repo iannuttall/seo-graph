@@ -12,8 +12,10 @@ Pure, runtime-agnostic core for agent-ready SEO:
 - **Agent markdown** — `renderAgentMarkdown` (deterministic built-HTML →
   Markdown with a strict content-selection contract, see
   [CONTRACT.md](./CONTRACT.md)), `renderMarkdownAlternate` (collection-source
-  rendering), route mapping, `agent-routes.json` manifests, `llms.txt`,
-  `gitLastmod`, and IndexNow submission + incremental manifest hashing.
+  rendering), safe `cleanMdx`, RFC 9110 Accept parsing, route mapping,
+  `agent-routes.json` manifests, composable `llms.txt`, optional
+  `llms-full.txt`, `gitLastmod`, and IndexNow submission + incremental
+  manifest hashing.
 
 ```sh
 pnpm add @iannuttall/seo-graph-core

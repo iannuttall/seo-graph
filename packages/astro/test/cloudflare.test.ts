@@ -306,3 +306,29 @@ test('rejects methods that cannot negotiate a representation', async () => {
   assert.equal(response.status, 405)
   assert.equal(response.headers.get('Allow'), 'GET, HEAD')
 })
+
+test('adds scoped llms.txt discovery links when configured', async () => {
+  const scoped = createCloudflareMarkdownHandler({
+    llmsTxtPath: '/docs/llms.txt',
+    site: 'https://example.com',
+  })
+  for (const request of [
+    new Request('https://example.com/docs'),
+    new Request('https://example.com/docs.md'),
+    new Request('https://example.com/docs', {
+      headers: { Accept: 'text/markdown' },
+    }),
+  ]) {
+    const response = await scoped(request, fixtureAssets())
+    assert.match(
+      response.headers.get('Link') ?? '',
+      /<https:\/\/example\.com\/docs\/llms\.txt>; rel="describedby"/u,
+    )
+  }
+
+  const outside = await scoped(
+    new Request('https://example.com/privacy'),
+    fixtureAssets(),
+  )
+  assert.doesNotMatch(outside.headers.get('Link') ?? '', /describedby/u)
+})

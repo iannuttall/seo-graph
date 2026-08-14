@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { agentMarkdownMiddleware } from '../src/middleware.js';
+import {
+    agentMarkdownMiddleware,
+    type AgentMarkdownMiddlewareOptions,
+} from '../src/middleware.js';
 
 const PAGE_HTML = `<!doctype html><html lang="en"><head>
   <title>Live stats</title>
@@ -10,6 +13,7 @@ const PAGE_HTML = `<!doctype html><html lang="en"><head>
 </main></body></html>`;
 
 type MinimalContext = {
+    request: Request;
     url: URL;
     site?: URL;
     rewrite: (path: string | URL | Request) => Promise<Response>;
@@ -18,9 +22,12 @@ type MinimalContext = {
 function context(
     pathname: string,
     rewrite?: MinimalContext['rewrite'],
+    requestHeaders?: HeadersInit,
 ): MinimalContext {
+    const url = new URL(`https://example.com${pathname}`);
     return {
-        url: new URL(`https://example.com${pathname}`),
+        request: new Request(url, { headers: requestHeaders }),
+        url,
         site: new URL('https://example.com'),
         rewrite:
             rewrite ??
@@ -35,9 +42,10 @@ const notFound = async () => new Response('Not Found', { status: 404 });
 const run = (
     ctx: MinimalContext,
     next: () => Promise<Response>,
+    options: AgentMarkdownMiddlewareOptions = {},
 ): Promise<Response> =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    agentMarkdownMiddleware()(ctx as any, next as any) as Promise<Response>;
+    agentMarkdownMiddleware(options)(ctx as any, next as any) as Promise<Response>;
 
 describe('agentMarkdownMiddleware', () => {
     it('renders a live markdown twin when no route answers the .md path', async () => {
@@ -142,5 +150,102 @@ describe('agentMarkdownMiddleware', () => {
         });
         const response = await run(context('/api/stats'), async () => json);
         expect(response).toBe(json);
+    });
+
+    it('serves Markdown at the canonical URL when negotiation is enabled', async () => {
+        const response = await run(
+            context('/stats', undefined, {
+                Accept: 'text/html;q=0.5, text/markdown',
+            }),
+            async () =>
+                new Response(PAGE_HTML, {
+                    headers: {
+                        'Content-Type': 'text/html; charset=utf-8',
+                        ETag: '"html"',
+                    },
+                }),
+            {
+                contentNegotiation: true,
+                llmsTxtPath: '/llms.txt',
+            },
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.headers.get('Content-Type')).toBe(
+            'text/markdown; charset=utf-8',
+        );
+        expect(response.headers.get('ETag')).toBeNull();
+        expect(response.headers.get('Vary')).toBe('Accept');
+        expect(response.headers.get('Link')).toContain(
+            '<https://example.com/stats>; rel="canonical"',
+        );
+        expect(response.headers.get('Link')).toContain(
+            '<https://example.com/llms.txt>; rel="describedby"',
+        );
+        expect(await response.text()).toContain('# Live stats');
+    });
+
+    it('keeps HTML when negotiation is disabled', async () => {
+        const response = await run(
+            context('/stats', undefined, { Accept: 'text/markdown' }),
+            async () =>
+                new Response(PAGE_HTML, {
+                    headers: { 'Content-Type': 'text/html' },
+                }),
+        );
+        expect(response.headers.get('Content-Type')).toBe('text/html');
+        expect(await response.text()).toBe(PAGE_HTML);
+    });
+
+    it('prefers an app Markdown route during negotiation', async () => {
+        const response = await run(
+            context(
+                '/stats',
+                async (path) =>
+                    String(path) === '/stats.md'
+                        ? new Response('# Exact source\n', {
+                              headers: { 'Content-Type': 'text/markdown' },
+                          })
+                        : new Response(PAGE_HTML, {
+                              headers: { 'Content-Type': 'text/html' },
+                          }),
+                { Accept: 'text/markdown' },
+            ),
+            async () =>
+                new Response(PAGE_HTML, {
+                    headers: { 'Content-Type': 'text/html' },
+                }),
+            { contentNegotiation: true },
+        );
+        expect(await response.text()).toBe('# Exact source\n');
+        expect(response.headers.get('Vary')).toBe('Accept');
+        expect(response.headers.get('Link')).toContain('rel="canonical"');
+    });
+
+    it('adds describedby only inside the configured llms.txt scope', async () => {
+        const response = await run(
+            context('/stats'),
+            async () =>
+                new Response(PAGE_HTML, {
+                    headers: { 'Content-Type': 'text/html' },
+                }),
+            { llmsTxtPath: '/docs/llms.txt' },
+        );
+        expect(response.headers.get('Link')).not.toContain('describedby');
+    });
+
+    it('sets Vary when negotiation is enabled without alternate links', async () => {
+        const response = await run(
+            context('/stats', undefined, {
+                Accept: 'text/html, text/markdown;q=0.5',
+            }),
+            async () =>
+                new Response(PAGE_HTML, {
+                    headers: { 'Content-Type': 'text/html' },
+                }),
+            { contentNegotiation: true, linkAlternate: false },
+        );
+        expect(response.headers.get('Vary')).toBe('Accept');
+        expect(response.headers.get('Link')).toBeNull();
     });
 });

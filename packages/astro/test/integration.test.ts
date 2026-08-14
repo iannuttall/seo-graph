@@ -4,7 +4,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'vitest'
-import { writeAgentMarkdownArtifacts } from '../src/integration.js'
+import {
+  agentMarkdown,
+  writeAgentMarkdownArtifacts,
+} from '../src/integration.js'
 
 const llmsTxt = {
   title: 'Example',
@@ -81,6 +84,10 @@ test('writes one deterministic artifact for each public content page', async () 
         ) ?? []
       ).length,
       1,
+    )
+    assert.match(
+      await readFile(join(directory, 'index.html'), 'utf8'),
+      /rel="describedby" href="https:\/\/example\.com\/llms\.txt"/u,
     )
     await assert.rejects(readFile(join(directory, 'old.md')), /ENOENT/u)
     await assert.rejects(readFile(join(directory, '404.md')), /ENOENT/u)
@@ -212,6 +219,106 @@ test('skips _headers emission when cloudflareHeaders is false', async () => {
       found = false
     }
     assert.equal(found, false)
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
+})
+
+test('writes scoped llms.txt and optional llms-full.txt files', async () => {
+  const directory = await fixtureDirectory()
+  try {
+    await writeFile(
+      join(directory, 'docs', 'index.html'),
+      page('/docs', 'Docs'),
+    )
+    await writeAgentMarkdownArtifacts({
+      outputDir: directory,
+      site: 'https://example.com',
+      llmsTxt: {
+        outputPath: '/docs/llms.txt',
+        title: 'Documentation',
+        summary: 'Product documentation.',
+      },
+      llmsFullTxt: true,
+    })
+
+    const index = await readFile(join(directory, 'docs', 'llms.txt'), 'utf8')
+    assert.match(index, /## Pages/u)
+    assert.match(index, /https:\/\/example\.com\/docs\.md/u)
+    assert.doesNotMatch(index, /index\.md/u)
+
+    const full = await readFile(
+      join(directory, 'docs', 'llms-full.txt'),
+      'utf8',
+    )
+    assert.match(full, /## Docs/u)
+    assert.match(full, /Useful Docs content\./u)
+
+    const homeHtml = await readFile(join(directory, 'index.html'), 'utf8')
+    const docsHtml = await readFile(
+      join(directory, 'docs', 'index.html'),
+      'utf8',
+    )
+    assert.doesNotMatch(homeHtml, /describedby/u)
+    assert.match(
+      docsHtml,
+      /rel="describedby" href="https:\/\/example\.com\/docs\/llms\.txt"/u,
+    )
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
+})
+
+test('requires llms.txt when llms-full.txt is enabled', async () => {
+  const directory = await fixtureDirectory()
+  try {
+    await assert.rejects(
+      writeAgentMarkdownArtifacts({
+        llmsFullTxt: true,
+        outputDir: directory,
+        site: 'https://example.com',
+      }),
+      /requires an llmsTxt/u,
+    )
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
+})
+
+test('adds runtime middleware only when it is enabled', () => {
+  for (const [enabled, expected] of [
+    [false, 0],
+    [true, 1],
+  ] as const) {
+    const added: unknown[] = []
+    const integration = agentMarkdown({ runtimeMiddleware: enabled })
+    const hook = integration.hooks['astro:config:setup']
+    assert.equal(typeof hook, 'function')
+    ;(hook as (input: unknown) => void)({
+      addMiddleware: (value: unknown) => added.push(value),
+    })
+    assert.equal(added.length, expected)
+  }
+})
+
+test('places default llms.txt inside the public Astro base', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'seo-astro-base-'))
+  try {
+    await writeFile(join(directory, 'index.html'), page('/seo', 'Home'))
+    await writeAgentMarkdownArtifacts({
+      base: '/seo',
+      llmsTxt: { title: 'Example', summary: 'Base path example.' },
+      outputDir: directory,
+      site: 'https://example.com/seo',
+    })
+    assert.match(
+      await readFile(join(directory, 'llms.txt'), 'utf8'),
+      /https:\/\/example\.com\/seo\/index\.md/u,
+    )
+    assert.match(
+      await readFile(join(directory, 'index.html'), 'utf8'),
+      /href="https:\/\/example\.com\/seo\/llms\.txt"/u,
+    )
   } finally {
     await rm(directory, { force: true, recursive: true })
   }

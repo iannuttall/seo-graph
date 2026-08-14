@@ -4,11 +4,17 @@ import { fileURLToPath } from 'node:url'
 import type { AstroConfig, AstroIntegration } from 'astro'
 import {
   canonicalFromHtml,
-  injectMarkdownAlternate,
+  injectAgentDiscoveryLinks,
   isNoindexHtml,
   isRedirectHtml,
+  llmsTxtCoversPath,
+  normalizeLlmsTxtPath,
 } from '@iannuttall/seo-graph-core'
-import { type LlmsTxtConfig, renderLlmsTxt } from '@iannuttall/seo-graph-core'
+import {
+  type LlmsTxtConfig,
+  renderLlmsFullTxt,
+  renderLlmsTxt,
+} from '@iannuttall/seo-graph-core'
 import {
   type AgentRouteManifest,
   type AgentRouteManifestEntry,
@@ -18,10 +24,28 @@ import {
 import { renderAgentMarkdown } from '@iannuttall/seo-graph-core'
 import { assertNoRouteCollisions, markdownRouteForPath } from '@iannuttall/seo-graph-core'
 
+export interface AgentLlmsTxtOptions extends LlmsTxtConfig {
+  /** Public output path. Defaults to `<base>/llms.txt`. */
+  outputPath?: string
+}
+
+export interface AgentLlmsFullTxtOptions {
+  /** Public output path. Defaults beside llms.txt as `llms-full.txt`. */
+  outputPath?: string
+}
+
 export interface AgentMarkdownIntegrationOptions {
   excludeSelectors?: readonly string[]
   manifestFile?: string
-  llmsTxt?: LlmsTxtConfig
+  llmsTxt?: AgentLlmsTxtOptions
+  /** Optional one-file export. Disabled by default and requires `llmsTxt`. */
+  llmsFullTxt?: boolean | AgentLlmsFullTxtOptions
+  /**
+   * Add package middleware for live twins and canonical URL content
+   * negotiation. Disabled by default. Use `agentMarkdownMiddleware()`
+   * directly when you need custom runtime options.
+   */
+  runtimeMiddleware?: boolean
   strict?: boolean
   /**
    * Append per-file rules for every generated `.md` route to the build's
@@ -72,6 +96,82 @@ function assertCanonicalSite(canonical: URL, site: URL): void {
   }
 }
 
+function normalizedBase(base = '/'): string {
+  if (!base.startsWith('/')) throw new Error('Base path must start with /')
+  return base.replace(/\/+$/u, '') || '/'
+}
+
+function resolveLlmsTxtPublicPath(
+  outputPath: string | undefined,
+  base: string | undefined,
+): string {
+  const basePath = normalizedBase(base)
+  return normalizeLlmsTxtPath(
+    outputPath ?? `${basePath === '/' ? '' : basePath}/llms.txt`,
+  )
+}
+
+function normalizeLlmsFullTxtPath(path: string): string {
+  if (!path.startsWith('/') || path.includes('?') || path.includes('#')) {
+    throw new Error('llms-full.txt path must be an absolute URL path')
+  }
+  if (path.includes('\\') || /%(?:2f|5c)/iu.test(path)) {
+    throw new Error('llms-full.txt path contains a separator')
+  }
+  const segments = path.split('/').filter(Boolean)
+  for (const segment of segments) {
+    let decoded: string
+    try {
+      decoded = decodeURIComponent(segment)
+    } catch {
+      throw new Error(`llms-full.txt path contains invalid encoding: ${segment}`)
+    }
+    if (decoded === '.' || decoded === '..') {
+      throw new Error('llms-full.txt path contains traversal')
+    }
+  }
+  if (segments.at(-1)?.toLowerCase() !== 'llms-full.txt') {
+    throw new Error('llms-full.txt path must end with /llms-full.txt')
+  }
+  return `/${segments.join('/')}`
+}
+
+function resolveLlmsFullTxtPublicPath(
+  outputPath: string | undefined,
+  llmsTxtPath: string,
+): string {
+  return normalizeLlmsFullTxtPath(
+    outputPath ?? llmsTxtPath.replace(/llms\.txt$/u, 'llms-full.txt'),
+  )
+}
+
+function outputFileForPublicPath(
+  outputDir: string,
+  publicPath: string,
+  base: string | undefined,
+): string {
+  const basePath = normalizedBase(base)
+  if (
+    basePath !== '/' &&
+    publicPath !== basePath &&
+    !publicPath.startsWith(`${basePath}/`)
+  ) {
+    throw new Error(`Output path ${publicPath} is outside base ${basePath}`)
+  }
+  const relativePath =
+    basePath === '/'
+      ? publicPath.slice(1)
+      : publicPath.slice(basePath.length).replace(/^\//u, '')
+  const target = resolve(
+    outputDir,
+    ...relativePath.split('/').map((segment) => decodeURIComponent(segment)),
+  )
+  if (!target.startsWith(`${outputDir}${sep}`)) {
+    throw new Error(`Output path escapes build directory: ${publicPath}`)
+  }
+  return target
+}
+
 const HEADERS_MARKER =
   '# Generated agent markdown headers. Do not edit in build output.'
 
@@ -79,13 +179,23 @@ export async function writeAgentMarkdownArtifacts(input: {
   base?: string
   excludeSelectors?: readonly string[]
   manifestFile?: string
-  llmsTxt?: LlmsTxtConfig
+  llmsTxt?: AgentLlmsTxtOptions
+  llmsFullTxt?: boolean | AgentLlmsFullTxtOptions
   cloudflareHeaders?: boolean
   outputDir: string
   site: string
 }): Promise<AgentRouteManifestEntry[]> {
   const outputDir = resolve(input.outputDir)
   const site = new URL(input.site)
+  if (input.llmsFullTxt && !input.llmsTxt) {
+    throw new Error('llmsFullTxt requires an llmsTxt configuration')
+  }
+  const llmsTxtPath = input.llmsTxt
+    ? resolveLlmsTxtPublicPath(input.llmsTxt.outputPath, input.base)
+    : undefined
+  const llmsTxtUrl = llmsTxtPath
+    ? new URL(llmsTxtPath, site).toString()
+    : undefined
   const prepared: Array<{
     entry: AgentRouteManifestEntry
     html: string
@@ -116,7 +226,13 @@ export async function writeAgentMarkdownArtifacts(input: {
       excludeSelectors: input.excludeSelectors,
     })
     const absoluteMarkdownUrl = new URL(route.markdownPath, site).toString()
-    const injectedHtml = injectMarkdownAlternate(html, absoluteMarkdownUrl)
+    const injectedHtml = injectAgentDiscoveryLinks(html, {
+      markdownUrl: absoluteMarkdownUrl,
+      llmsTxtUrl:
+        llmsTxtPath && llmsTxtCoversPath(llmsTxtPath, canonical.pathname)
+          ? llmsTxtUrl
+          : undefined,
+    })
     const bytes = Buffer.byteLength(rendered.markdown)
     prepared.push({
       entry: {
@@ -181,11 +297,49 @@ export async function writeAgentMarkdownArtifacts(input: {
     'utf8',
   )
   if (input.llmsTxt) {
+    const scopedManifest: AgentRouteManifest = {
+      ...manifest,
+      pages: manifest.pages.filter((page) =>
+        llmsTxtCoversPath(llmsTxtPath!, page.htmlPath),
+      ),
+    }
+    const llmsFile = outputFileForPublicPath(
+      outputDir,
+      llmsTxtPath!,
+      input.base,
+    )
+    await mkdir(dirname(llmsFile), { recursive: true })
     await writeFile(
-      resolve(outputDir, 'llms.txt'),
-      renderLlmsTxt(manifest, input.llmsTxt),
+      llmsFile,
+      renderLlmsTxt(scopedManifest, input.llmsTxt),
       'utf8',
     )
+    if (input.llmsFullTxt) {
+      const fullOptions =
+        typeof input.llmsFullTxt === 'object' ? input.llmsFullTxt : {}
+      const fullPath = resolveLlmsFullTxtPublicPath(
+        fullOptions.outputPath,
+        llmsTxtPath!,
+      )
+      const fullFile = outputFileForPublicPath(
+        outputDir,
+        fullPath,
+        input.base,
+      )
+      const markdownByHtmlPath = new Map(
+        prepared.map((item) => [item.entry.htmlPath, item.markdown]),
+      )
+      await mkdir(dirname(fullFile), { recursive: true })
+      await writeFile(
+        fullFile,
+        renderLlmsFullTxt(
+          scopedManifest,
+          input.llmsTxt,
+          markdownByHtmlPath,
+        ),
+        'utf8',
+      )
+    }
   }
 
   if (input.cloudflareHeaders !== false) {
@@ -199,16 +353,24 @@ export async function writeAgentMarkdownArtifacts(input: {
     const existing = (
       markerIndex === -1 ? existingRaw : existingRaw.slice(0, markerIndex)
     ).trimEnd()
-    const rules = manifest.pages.map((page) =>
-      [
+    const rules = manifest.pages.map((page) => {
+      const linkValues = [`<${page.canonical}>; rel="canonical"`]
+      if (
+        llmsTxtPath &&
+        llmsTxtUrl &&
+        llmsTxtCoversPath(llmsTxtPath, page.htmlPath)
+      ) {
+        linkValues.push(`<${llmsTxtUrl}>; rel="describedby"`)
+      }
+      return [
         page.markdownPath,
         '  ! Vary',
         '  Content-Type: text/markdown; charset=utf-8',
-        `  Link: <${page.canonical}>; rel="canonical"`,
+        `  Link: ${linkValues.join(', ')}`,
         '  Vary: Accept',
         `  X-Markdown-Tokens: ${page.tokens}`,
-      ].join('\n'),
-    )
+      ].join('\n')
+    })
     await writeFile(
       headersPath,
       `${existing}${existing ? '\n\n' : ''}${HEADERS_MARKER}\n${rules.join('\n\n')}\n`,
@@ -228,6 +390,14 @@ export function agentMarkdown(
   return {
     name: '@iannuttall/seo-graph-astro',
     hooks: {
+      'astro:config:setup': ({ addMiddleware }) => {
+        if (options.runtimeMiddleware) {
+          addMiddleware({
+            entrypoint: new URL('./runtime-middleware.js', import.meta.url),
+            order: 'post',
+          })
+        }
+      },
       'astro:config:done': ({ config: resolvedConfig }) => {
         if (strict && !resolvedConfig.site) {
           throw new Error('@iannuttall/seo-graph-astro requires a configured site URL')
@@ -244,6 +414,7 @@ export function agentMarkdown(
           excludeSelectors: options.excludeSelectors,
           manifestFile: options.manifestFile,
           llmsTxt: options.llmsTxt,
+          llmsFullTxt: options.llmsFullTxt,
           cloudflareHeaders: options.cloudflareHeaders,
           // Static builds emit HTML into the build dir itself; server and
           // hybrid builds put prerendered HTML in build.client.

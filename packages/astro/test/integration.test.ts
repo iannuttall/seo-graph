@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { test } from 'vitest'
 import {
   agentMarkdown,
@@ -139,7 +140,7 @@ test('supports directory, file, and mixed static build layouts', async () => {
     await mkdir(join(directory, 'guide'), { recursive: true })
     await writeFile(
       join(directory, 'guide', 'index.html'),
-      page('/guide', 'Directory page'),
+      page('/guide/', 'Directory page'),
     )
     await writeFile(
       join(directory, 'reference.html'),
@@ -154,12 +155,12 @@ test('supports directory, file, and mixed static build layouts', async () => {
     assert.deepEqual(
       entries.map((entry) => [entry.htmlFile, entry.markdownFile]),
       [
-        ['guide/index.html', 'guide.md'],
+        ['guide/index.html', 'guide/index.md'],
         ['reference.html', 'reference.md'],
       ],
     )
     assert.match(
-      await readFile(join(directory, 'guide.md'), 'utf8'),
+      await readFile(join(directory, 'guide', 'index.md'), 'utf8'),
       /# Directory page/u,
     )
     assert.match(
@@ -269,6 +270,83 @@ test('writes scoped llms.txt and optional llms-full.txt files', async () => {
   }
 })
 
+test('writes overlapping llms.txt scopes and advertises the most specific file', async () => {
+  const directory = await fixtureDirectory()
+  try {
+    await writeFile(
+      join(directory, 'docs', 'index.html'),
+      page('/docs', 'Docs'),
+    )
+    await writeAgentMarkdownArtifacts({
+      outputDir: directory,
+      site: 'https://example.com',
+      llmsTxt: [
+        { title: 'Example', summary: 'All site pages.' },
+        {
+          outputPath: '/docs/llms.txt',
+          title: 'Example docs',
+          summary: 'Documentation pages.',
+        },
+      ],
+    })
+
+    assert.match(
+      await readFile(join(directory, 'llms.txt'), 'utf8'),
+      /https:\/\/example\.com\/index\.md/u,
+    )
+    const docsIndex = await readFile(
+      join(directory, 'docs', 'llms.txt'),
+      'utf8',
+    )
+    assert.match(docsIndex, /https:\/\/example\.com\/docs\.md/u)
+    assert.doesNotMatch(docsIndex, /index\.md/u)
+
+    assert.match(
+      await readFile(join(directory, 'index.html'), 'utf8'),
+      /href="https:\/\/example\.com\/llms\.txt"/u,
+    )
+    assert.match(
+      await readFile(join(directory, 'docs', 'index.html'), 'utf8'),
+      /href="https:\/\/example\.com\/docs\/llms\.txt"/u,
+    )
+    const headers = await readFile(join(directory, '_headers'), 'utf8')
+    assert.match(
+      headers,
+      /\/docs\.md[\s\S]*<https:\/\/example\.com\/docs\/llms\.txt>; rel="describedby"/u,
+    )
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
+})
+
+test('rejects duplicate llms.txt outputs and legacy full output with many scopes', async () => {
+  const directory = await fixtureDirectory()
+  try {
+    await assert.rejects(
+      writeAgentMarkdownArtifacts({
+        outputDir: directory,
+        site: 'https://example.com',
+        llmsTxt: [{ title: 'One' }, { title: 'Two' }],
+      }),
+      /output paths must be unique/u,
+    )
+    await assert.rejects(
+      writeAgentMarkdownArtifacts({
+        outputDir: directory,
+        site: 'https://example.com',
+        llmsTxt: [
+          { title: 'All' },
+          { outputPath: '/docs/llms.txt', title: 'Docs' },
+        ],
+        llmsFullTxt: true,
+      }),
+      /supports exactly one/u,
+    )
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
+})
+
 test('requires llms.txt when llms-full.txt is enabled', async () => {
   const directory = await fixtureDirectory()
   try {
@@ -298,6 +376,45 @@ test('adds runtime middleware only when it is enabled', () => {
       addMiddleware: (value: unknown) => added.push(value),
     })
     assert.equal(added.length, expected)
+  }
+})
+
+test('warns when v2 changes a trailing-slash Markdown route', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'seo-astro-migration-'))
+  try {
+    await mkdir(join(directory, 'docs'), { recursive: true })
+    await writeFile(
+      join(directory, 'docs', 'index.html'),
+      page('/docs/', 'Docs'),
+    )
+    const warnings: string[] = []
+    const integration = agentMarkdown()
+    const configDone = integration.hooks['astro:config:done']
+    const buildDone = integration.hooks['astro:build:done']
+    assert.equal(typeof configDone, 'function')
+    assert.equal(typeof buildDone, 'function')
+    ;(configDone as (input: unknown) => void)({
+      config: {
+        base: '/',
+        output: 'static',
+        site: new URL('https://example.com'),
+      },
+    })
+    await (buildDone as (input: unknown) => Promise<void>)({
+      dir: pathToFileURL(`${directory}/`),
+      logger: {
+        info: () => {},
+        warn: (message: string) => warnings.push(message),
+      },
+    })
+
+    assert.ok(
+      warnings.some((message) =>
+        message.includes('/docs/: /docs.md -> /docs/index.md'),
+      ),
+    )
+  } finally {
+    await rm(directory, { force: true, recursive: true })
   }
 })
 

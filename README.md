@@ -16,7 +16,7 @@ agents.
 
 | Package | Purpose |
 | --- | --- |
-| [`@iannuttall/seo-graph-core`](./packages/core) | Pure, runtime-agnostic core. Schema piece builders and graph assembler (typed by [`schema-dts`](https://github.com/google/schema-dts)), the built-HTML → Markdown renderer with a strict content-selection contract, MDX cleaning, route mapping, manifests, `llms.txt`, optional `llms-full.txt`, git-based lastmod, and IndexNow hashing. |
+| [`@iannuttall/seo-graph-core`](./packages/core) | Pure, runtime-agnostic core. Schema piece builders and graph assembler (typed by [`schema-dts`](https://github.com/google/schema-dts)), the built-HTML → Markdown renderer with a strict content-selection contract, MDX cleaning, route mapping, manifests, validated `llms.txt` v2 output, git-based lastmod, and IndexNow hashing. |
 | [`@iannuttall/seo-graph-astro`](./packages/astro) | Astro layer. `agentMarkdown()` build integration, opt-in generic content negotiation, Markdown response and collection helpers, schema endpoints + schema map, IndexNow key route, RFC 9727 api-catalog, Zod content helpers, and a static-asset Cloudflare handler (`./cloudflare`). |
 
 ## Why not convert HTML at the edge?
@@ -57,6 +57,9 @@ export default defineConfig({
             },
             // Optional. Defaults to false, so static sites keep no runtime cost.
             // runtimeMiddleware: true,
+            // The build warns about old /page.md URLs that move to
+            // /page/index.md. Disable this after you add redirects.
+            // routeMigrationWarnings: false,
         }),
     ],
 });

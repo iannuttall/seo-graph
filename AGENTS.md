@@ -2401,12 +2401,18 @@ export default defineConfig({
             // strict: true,   // fail the build on contract violations
             llmsTxt: {
                 title: 'Example',
+                // Optional in llms.txt v2. The H1 title is the only
+                // required part of the file.
                 summary: 'What this site is about, one line.',
             },
             // Opt in to live twins and Accept negotiation on any Astro adapter.
             // Static-only sites can leave this false and pay no runtime cost.
             // runtimeMiddleware: true,
-            // Optional convenience export; not part of the llms.txt v2 proposal.
+            // The build warns about trailing-slash routes that change from
+            // /page.md to /page/index.md. It does not stop the build.
+            // Set this to false after you add redirects for old URLs.
+            // routeMigrationWarnings: false,
+            // Deprecated legacy export. Use only for a known consumer.
             // llmsFullTxt: true,
         }),
     ],
@@ -2566,12 +2572,24 @@ engine (in core) walks entries, runs your mapper, and dedupes by `@id`.
   auto-generated page list from the build output. Deterministic ordering.
 - **Scoped output** — set `llmsTxt.outputPath` to `/docs/llms.txt`; only pages
   under `/docs` enter the automatic list and get `rel="describedby"`.
+- **Overlapping scopes.** Pass an array to `llmsTxt` when a site needs more
+  than one file. A page points to the most specific file that covers it.
 - **Composition** — `llmsTxt.details` adds free-form Markdown after the
-  summary. Set `autoSection` to add unlisted manifest pages before or after
-  manual sections. Explicit sections keep their previous output bytes.
-- **`llms-full.txt`** — set `llmsFullTxt: true` for an optional one-file
-  export of the selected internal pages. It is off by default and is not part
-  of the llms.txt v2 proposal.
+  summary. Details cannot contain headings because H2 headings start file
+  lists in version 2. Set `autoSection` to add unlisted manifest pages before
+  or after manual sections.
+- **Validation.** `renderLlmsTxt()` validates its output before it returns.
+  Use `validateLlmsTxtV2()` to check another generated file.
+- **Markdown URL forms.** A file URL such as `/guide.html` maps to
+  `/guide.html.md`. A directory URL such as `/docs/` maps to
+  `/docs/index.md`, as version 2 specifies.
+- **Migration audit.** Astro builds warn when a trailing-slash page changes
+  from `/page.md` to `/page/index.md`. This warning does not stop the build or
+  add redirects. For another framework, call
+  `auditMarkdownRouteMigrations()` from core with its canonical page paths or
+  URLs. Set `routeMigrationWarnings: false` after an Astro site has redirects.
+- **`llms-full.txt`.** This legacy export remains for compatibility. Version
+  2 removed context-expansion tooling, so new integrations should not use it.
 - **`agent-routes.json`** — every HTML route and its Markdown twin with
   per-page sha256 and token counts, so parity between representations is
   provable rather than assumed.

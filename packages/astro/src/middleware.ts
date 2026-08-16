@@ -4,9 +4,8 @@ import {
   canonicalFromHtml,
   htmlPathForMarkdownPath,
   isNoindexHtml,
-  llmsTxtCoversPath,
+  llmsTxtPathForPage,
   markdownRouteForPath,
-  normalizeLlmsTxtPath,
   renderAgentMarkdown,
 } from '@iannuttall/seo-graph-core'
 
@@ -31,7 +30,7 @@ export interface AgentMarkdownMiddlewareOptions {
    * Public path of the llms.txt file that describes these pages. When set,
    * covered HTML and Markdown responses get `rel="describedby"`.
    */
-  llmsTxtPath?: string
+  llmsTxtPath?: string | readonly string[]
   /**
    * Append Markdown discovery links and `Vary: Accept` to server-rendered
    * HTML responses. Defaults to `true`.
@@ -82,13 +81,12 @@ function withHeaders(
 
 function describedByForPath(
   pathname: string,
-  llmsTxtPath: string | undefined,
+  llmsTxtPath: string | readonly string[] | undefined,
   baseUrl: URL,
 ): string | undefined {
   if (!llmsTxtPath) return undefined
-  const normalized = normalizeLlmsTxtPath(llmsTxtPath)
-  if (!llmsTxtCoversPath(normalized, pathname)) return undefined
-  return new URL(normalized, baseUrl).toString()
+  const selected = llmsTxtPathForPage(llmsTxtPath, pathname)
+  return selected ? new URL(selected, baseUrl).toString() : undefined
 }
 
 function appendDiscoveryLinks(

@@ -38,9 +38,10 @@ export function injectAgentDiscoveryLinks(
   links: AgentDiscoveryLinks,
 ): string {
   const withoutManagedLinks = html.replace(markdownAlternatePattern, '')
-  const withoutDiscoveryLinks = links.llmsTxtUrl
-    ? withoutManagedLinks.replace(llmsDescribedByPattern, '')
-    : withoutManagedLinks
+  const withoutDiscoveryLinks = withoutManagedLinks.replace(
+    llmsDescribedByPattern,
+    '',
+  )
   const closeHead = /<\/head\s*>/iu
   if (!closeHead.test(withoutDiscoveryLinks)) {
     throw new Error('Cannot inject Markdown alternate without </head>')

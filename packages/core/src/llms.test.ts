@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   llmsTxtCoversPath,
+  llmsTxtPathForPage,
   normalizeLlmsTxtPath,
   renderLlmsFullTxt,
   renderLlmsTxt,
+  validateLlmsTxtV2,
 } from './llms.js'
 import type { AgentRouteManifest } from './manifest.js'
 
@@ -191,4 +193,83 @@ test('normalizes scoped llms.txt paths and checks their coverage', () => {
   assert.equal(llmsTxtCoversPath('/docs/llms.txt', '/blog'), false)
   assert.throws(() => normalizeLlmsTxtPath('/docs/index.txt'), /llms\.txt/u)
   assert.throws(() => normalizeLlmsTxtPath('/../llms.txt'), /traversal/u)
+})
+
+test('selects the most specific llms.txt scope for each page', () => {
+  const paths = ['/llms.txt', '/docs/llms.txt', '/docs/api/llms.txt']
+  assert.equal(llmsTxtPathForPage(paths, '/about'), '/llms.txt')
+  assert.equal(llmsTxtPathForPage(paths, '/docs/start'), '/docs/llms.txt')
+  assert.equal(
+    llmsTxtPathForPage(paths, '/docs/api/reference'),
+    '/docs/api/llms.txt',
+  )
+  assert.equal(llmsTxtPathForPage('/docs/llms.txt', '/blog'), undefined)
+})
+
+test('accepts a title-only v2 file and validates file-list structure', () => {
+  const titleOnly = renderLlmsTxt(manifest, {
+    autoSection: false,
+    title: 'Example',
+  })
+  assert.equal(titleOnly, '# Example\n')
+  assert.deepEqual(validateLlmsTxtV2(titleOnly), [])
+  assert.match(
+    validateLlmsTxtV2('# Example\n\n## Docs\n\nPlain text\n').join(' '),
+    /not a Markdown link entry/u,
+  )
+  assert.match(
+    validateLlmsTxtV2('# Example\n\n### Wrong\n').join(' '),
+    /only level-one and level-two/u,
+  )
+})
+
+test('normalizes inline metadata and rejects headings in details', () => {
+  const rendered = renderLlmsTxt(manifest, {
+    title: 'Example\nsite',
+    summary: 'Useful\nsummary',
+    sections: [
+      {
+        heading: 'Start\nhere',
+        items: [{ label: 'Docs \\ [quick]', path: '/docs' }],
+      },
+    ],
+  })
+  assert.match(rendered, /^# Example site$/mu)
+  assert.match(rendered, /^> Useful summary$/mu)
+  assert.match(rendered, /^## Start here$/mu)
+  assert.match(rendered, /\[Docs \\\\ \[quick\\\]\]/u)
+  assert.deepEqual(validateLlmsTxtV2(rendered), [])
+
+  assert.throws(
+    () =>
+      renderLlmsTxt(manifest, {
+        autoSection: false,
+        details: '## Hidden section',
+        title: 'Example',
+      }),
+    /must not contain Markdown headings/u,
+  )
+
+  const codeExample = renderLlmsTxt(manifest, {
+    autoSection: false,
+    details: '```md\n## This is code\n```\n\n---',
+    title: 'Example',
+  })
+  assert.deepEqual(validateLlmsTxtV2(codeExample), [])
+})
+
+test('does not treat local audit limits as llms.txt v2 protocol rules', () => {
+  const largeManifest: AgentRouteManifest = {
+    ...manifest,
+    pages: Array.from({ length: 101 }, (_, index) => ({
+      ...manifest.pages[0]!,
+      canonical: `https://example.com/page-${index}`,
+      htmlPath: `/page-${index}`,
+      markdownPath: `/page-${index}.md`,
+      title: `Page ${index}`,
+    })),
+  }
+  const rendered = renderLlmsTxt(largeManifest, { title: 'Example' })
+  assert.equal((rendered.match(/^- \[/gmu) ?? []).length, 101)
+  assert.deepEqual(validateLlmsTxtV2(rendered), [])
 })

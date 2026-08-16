@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  auditMarkdownRouteMigrations,
   assertNoRouteCollisions,
   htmlPathForMarkdownPath,
   markdownRouteForPath,
@@ -13,10 +14,54 @@ test('maps root and nested pages to one stable public contract', () => {
     filePath: 'index.md',
   })
   assert.deepEqual(markdownRouteForPath('/docs/start/'), {
-    htmlPath: '/docs/start',
-    markdownPath: '/docs/start.md',
-    filePath: 'docs/start.md',
+    htmlPath: '/docs/start/',
+    markdownPath: '/docs/start/index.md',
+    filePath: 'docs/start/index.md',
   })
+})
+
+test('uses both Markdown URL forms allowed by llms.txt v2', () => {
+  assert.equal(markdownRouteForPath('/docs/').markdownPath, '/docs/index.md')
+  assert.equal(markdownRouteForPath('/docs').markdownPath, '/docs.md')
+  assert.equal(
+    markdownRouteForPath('/guide.html').markdownPath,
+    '/guide.html.md',
+  )
+  assert.equal(htmlPathForMarkdownPath('/docs/index.md'), '/docs/')
+})
+
+test('reports route migrations without changing routes or files', () => {
+  assert.deepEqual(
+    auditMarkdownRouteMigrations([
+      'https://example.com/docs/',
+      '/about/',
+      '/contact',
+      '/',
+      '/docs/',
+    ]),
+    [
+      {
+        htmlPath: '/about/',
+        legacyMarkdownPath: '/about.md',
+        v2MarkdownPath: '/about/index.md',
+      },
+      {
+        htmlPath: '/docs/',
+        legacyMarkdownPath: '/docs.md',
+        v2MarkdownPath: '/docs/index.md',
+      },
+    ],
+  )
+  assert.deepEqual(
+    auditMarkdownRouteMigrations(['/seo/', '/seo/docs/'], '/seo'),
+    [
+      {
+        htmlPath: '/seo/docs/',
+        legacyMarkdownPath: '/seo/docs.md',
+        v2MarkdownPath: '/seo/docs/index.md',
+      },
+    ],
+  )
 })
 
 test('keeps a base in public URLs without duplicating it in files', () => {
@@ -36,6 +81,7 @@ test('round trips every generated public route through the shared mapper', () =>
   for (const [pathname, base] of [
     ['/', '/'],
     ['/docs', '/'],
+    ['/docs/', '/'],
     ['/caf%C3%A9', '/'],
     ['/seo', '/seo'],
     ['/seo/docs/start', '/seo'],
@@ -74,8 +120,8 @@ test('rejects duplicate and case-only output collisions', () => {
   assert.throws(
     () =>
       assertNoRouteCollisions([
-        markdownRouteForPath('/docs'),
         markdownRouteForPath('/docs/'),
+        markdownRouteForPath('/docs/index'),
       ]),
     /Duplicate/u,
   )

@@ -234,6 +234,23 @@ describe('agentMarkdownMiddleware', () => {
         expect(response.headers.get('Link')).not.toContain('describedby');
     });
 
+    it('uses the most specific llms.txt scope', async () => {
+        const response = await run(
+            context('/stats/details'),
+            async () =>
+                new Response(PAGE_HTML, {
+                    headers: { 'Content-Type': 'text/html' },
+                }),
+            { llmsTxtPath: ['/llms.txt', '/stats/llms.txt'] },
+        );
+        expect(response.headers.get('Link')).toContain(
+            '<https://example.com/stats/llms.txt>; rel="describedby"',
+        );
+        expect(response.headers.get('Link')).not.toContain(
+            '<https://example.com/llms.txt>; rel="describedby"',
+        );
+    });
+
     it('sets Vary when negotiation is enabled without alternate links', async () => {
         const response = await run(
             context('/stats', undefined, {

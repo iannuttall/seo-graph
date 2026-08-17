@@ -59,3 +59,12 @@ test('injects one scoped llms.txt describedby link idempotently', () => {
   assert.equal((once.match(/rel="describedby"/gu) ?? []).length, 1)
   assert.match(once, /href="https:\/\/example\.com\/docs\/llms\.txt"/u)
 })
+
+test('removes a stale managed llms.txt link when no scope covers the page', () => {
+  const original =
+    '<html><head><link rel="describedby" href="https://example.com/docs/llms.txt"></head><body></body></html>'
+  const result = injectAgentDiscoveryLinks(original, {
+    markdownUrl: 'https://example.com/blog/post.md',
+  })
+  assert.doesNotMatch(result, /describedby/u)
+})

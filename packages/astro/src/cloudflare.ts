@@ -1,9 +1,8 @@
 import {
   acceptsMarkdown,
   htmlPathForMarkdownPath,
-  llmsTxtCoversPath,
+  llmsTxtPathForPage,
   markdownRouteForPath,
-  normalizeLlmsTxtPath,
   parseAccept,
 } from '@iannuttall/seo-graph-core'
 
@@ -19,7 +18,7 @@ export interface CloudflareMarkdownOptions {
   contentSignal?: string
   ignoredMarkdownPrefixes?: readonly string[]
   /** Public llms.txt path used for `rel="describedby"` discovery. */
-  llmsTxtPath?: string
+  llmsTxtPath?: string | readonly string[]
   noindexPaths?: readonly string[]
   responseHeaders?: Readonly<Record<string, string>>
   site: string
@@ -165,13 +164,11 @@ export function createCloudflareMarkdownHandler(
   const ignoredPrefixes =
     options.ignoredMarkdownPrefixes ?? defaultIgnoredMarkdownPrefixes
   const noindexPaths = new Set(options.noindexPaths ?? [])
-  const llmsTxtPath = options.llmsTxtPath
-    ? normalizeLlmsTxtPath(options.llmsTxtPath)
-    : undefined
-  const describedBy = (pathname: string): string | undefined =>
-    llmsTxtPath && llmsTxtCoversPath(llmsTxtPath, pathname)
-      ? canonicalUrl(site, llmsTxtPath)
-      : undefined
+  const describedBy = (pathname: string): string | undefined => {
+    if (!options.llmsTxtPath) return undefined
+    const selected = llmsTxtPathForPage(options.llmsTxtPath, pathname)
+    return selected ? canonicalUrl(site, selected) : undefined
+  }
 
   return async (request, assets) => {
     const requestUrl = new URL(request.url)

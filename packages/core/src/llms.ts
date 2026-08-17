@@ -34,7 +34,11 @@ export interface LlmsTxtConfig {
   details?: string
   /** Curated file sections. Existing explicit configurations are unchanged. */
   sections?: readonly LlmsTxtSection[]
-  summary: string
+  /**
+   * Optional short blockquote summary. The v2 specification requires only
+   * the title.
+   */
+  summary?: string
   title: string
 }
 
@@ -73,6 +77,23 @@ export function llmsTxtCoversPath(
   return pagePath === scope || pagePath.startsWith(`${scope}/`)
 }
 
+/**
+ * Return the most specific llms.txt file that covers a page. This implements
+ * the v2 rule for sites that publish more than one scoped file.
+ */
+export function llmsTxtPathForPage(
+  llmsTxtPaths: string | readonly string[],
+  pagePath: string,
+): string | undefined {
+  const paths = typeof llmsTxtPaths === 'string' ? [llmsTxtPaths] : llmsTxtPaths
+  return [...new Set(paths.map((path) => normalizeLlmsTxtPath(path)))]
+    .filter((path) => llmsTxtCoversPath(path, pagePath))
+    .sort(
+      (left, right) =>
+        right.length - left.length || left.localeCompare(right, 'en-US'),
+    )[0]
+}
+
 function isExternalItem(
   item: LlmsTxtRouteItem | LlmsTxtExternalItem,
 ): item is LlmsTxtExternalItem {
@@ -80,7 +101,81 @@ function isExternalItem(
 }
 
 function cleanTitle(value: string): string {
-  return value.replace(/\s+\|\s+[^|]+$/u, '').trim()
+  return inlineText(value).replace(/\s+\|\s+[^|]+$/u, '').trim()
+}
+
+function inlineText(value: string): string {
+  return value.replace(/\s+/gu, ' ').trim()
+}
+
+function linkLabel(value: string): string {
+  return inlineText(value).replace(/\\/gu, '\\\\').replace(/\]/gu, '\\]')
+}
+
+function descriptionSuffix(value: string | undefined): string {
+  const description = value ? inlineText(value) : ''
+  return description ? `: ${description}` : ''
+}
+
+function markdownUrl(value: URL): string {
+  return value.toString().replace(/\(/gu, '%28').replace(/\)/gu, '%29')
+}
+
+interface MarkdownHeading {
+  index: number
+  level: number
+  title: string
+}
+
+function markdownHeadings(value: string): MarkdownHeading[] {
+  const lines = value.replace(/\r\n?/gu, '\n').split('\n')
+  const headings: MarkdownHeading[] = []
+  let fence: { character: string; length: number } | undefined
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? ''
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/u)?.[1]
+    if (fenceMatch) {
+      const character = fenceMatch[0] ?? ''
+      if (
+        fence &&
+        character === fence.character &&
+        fenceMatch.length >= fence.length
+      ) {
+        fence = undefined
+      } else if (!fence) {
+        fence = { character, length: fenceMatch.length }
+      }
+      continue
+    }
+    if (fence) continue
+
+    const atx = line.match(/^ {0,3}(#{1,6})(?:[ \t]+|$)(.*)$/u)
+    if (atx?.[1]) {
+      headings.push({
+        index,
+        level: atx[1].length,
+        title: (atx[2] ?? '').replace(/[ \t]+#+[ \t]*$/u, '').trim(),
+      })
+      continue
+    }
+
+    const setext = line.match(/^ {0,3}(=+|-+)[ \t]*$/u)?.[1]
+    const previous = lines[index - 1]?.trim()
+    if (setext && previous) {
+      headings.push({
+        index,
+        level: setext[0] === '=' ? 1 : 2,
+        title: previous,
+      })
+    }
+  }
+  return headings
+}
+
+function assertDetailsHaveNoHeadings(details: string): void {
+  if (markdownHeadings(details).length > 0) {
+    throw new Error('llms.txt details must not contain Markdown headings')
+  }
 }
 
 function routeItem(
@@ -94,9 +189,9 @@ function routeItem(
   if (page.noindex) {
     throw new Error(`llms.txt route must be indexable: ${item.path}`)
   }
-  const label = item.label?.trim() || cleanTitle(page.title)
+  const label = linkLabel(item.label?.trim() || cleanTitle(page.title))
   return {
-    line: `- [${label}](${new URL(page.markdownPath, site)}): ${page.description}`,
+    line: `- [${label}](${markdownUrl(new URL(page.markdownPath, site))})${descriptionSuffix(page.description)}`,
     page,
   }
 }
@@ -106,8 +201,7 @@ function externalItem(item: LlmsTxtExternalItem, site: URL): string {
   if (!['http:', 'https:'].includes(url.protocol)) {
     throw new Error(`llms.txt link must use HTTP or HTTPS: ${item.url}`)
   }
-  const description = item.description ? `: ${item.description}` : ''
-  return `- [${item.label}](${url})${description}`
+  return `- [${linkLabel(item.label)}](${markdownUrl(url)})${descriptionSuffix(item.description)}`
 }
 
 interface ResolvedLlmsTxtSection {
@@ -129,7 +223,8 @@ function resolveLlmsTxt(
   const seen = new Set<string>()
   const selectedPages: AgentRouteManifestEntry[] = []
   const manualSections = (config.sections ?? []).map((section) => {
-    if (!section.heading.trim() || section.items.length === 0) {
+    const heading = inlineText(section.heading)
+    if (!heading || section.items.length === 0) {
       throw new Error(
         'llms.txt sections require a heading and at least one item',
       )
@@ -145,7 +240,7 @@ function resolveLlmsTxt(
       selectedPages.push(resolved.page)
       return resolved.line
     })
-    return { heading: section.heading, lines }
+    return { heading, lines }
   })
 
   const autoSection =
@@ -165,11 +260,14 @@ function resolveLlmsTxt(
 
   const autoOptions = typeof autoSection === 'object' ? autoSection : {}
   const generated: ResolvedLlmsTxtSection = {
-    heading: autoOptions.heading?.trim() || 'Pages',
+    heading: inlineText(autoOptions.heading ?? '') || 'Pages',
     lines: autoPages.map(
       (page) =>
-        `- [${cleanTitle(page.title)}](${new URL(page.markdownPath, site)}): ${page.description}`,
+        `- [${linkLabel(cleanTitle(page.title))}](${markdownUrl(new URL(page.markdownPath, site))})${descriptionSuffix(page.description)}`,
     ),
+  }
+  if (generated.lines.length === 0) {
+    return { pages: selectedPages, sections: manualSections }
   }
   const sections =
     autoOptions.position === 'before'
@@ -183,13 +281,82 @@ function resolveLlmsTxt(
 }
 
 function renderHeader(config: LlmsTxtConfig): string[] {
-  if (!config.title.trim() || !config.summary.trim()) {
-    throw new Error('llms.txt requires a title and summary')
-  }
-  const lines = [`# ${config.title.trim()}`, '', `> ${config.summary.trim()}`]
+  const title = inlineText(config.title)
+  if (!title) throw new Error('llms.txt requires a title')
+  const lines = [`# ${title}`]
+  const summary = inlineText(config.summary ?? '')
+  if (summary) lines.push('', `> ${summary}`)
   const details = config.details?.trim()
-  if (details) lines.push('', details)
+  if (details) {
+    assertDetailsHaveNoHeadings(details)
+    lines.push('', details)
+  }
   return lines
+}
+
+function parseLlmsLinkLine(line: string): boolean {
+  const match = line.match(
+    /^ {0,3}[-+*][\t ]+\[(?:\\.|[^\]])+\]\((https?:\/\/[^\s)]+)\)(?:[\t ]*:[\t ]*.*)?$/u,
+  )
+  if (!match?.[1]) return false
+  try {
+    const url = new URL(match[1])
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+/** Validate the strict llms.txt v2 structure used by this package. */
+export function validateLlmsTxtV2(value: string): string[] {
+  const normalized = value.replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n')
+  const lines = normalized.split('\n')
+  const headings = markdownHeadings(normalized)
+  const errors: string[] = []
+  if (!lines[0]?.match(/^ {0,3}#\s+\S/u)) {
+    errors.push('The first line must be one level-one heading.')
+  }
+  if (headings.filter((heading) => heading.level === 1).length !== 1) {
+    errors.push('The file must contain exactly one level-one heading.')
+  }
+  if (headings.some((heading) => heading.level >= 3)) {
+    errors.push('The file can use only level-one and level-two headings.')
+  }
+
+  const sectionHeadings = new Map(
+    headings
+      .filter((heading) => heading.level === 2)
+      .map((heading) => [heading.index, heading]),
+  )
+
+  let inFileList = false
+  let sectionTitle = ''
+  let sectionLinks = 0
+  for (const [index, rawLine] of lines.entries()) {
+    const line = rawLine.trim()
+    const heading = sectionHeadings.get(index)
+    if (heading) {
+      if (inFileList && sectionLinks === 0) {
+        errors.push(`Section "${sectionTitle}" has no Markdown links.`)
+      }
+      inFileList = true
+      sectionTitle = heading.title
+      sectionLinks = 0
+      continue
+    }
+    if (!inFileList || !line) continue
+    if (parseLlmsLinkLine(rawLine)) {
+      sectionLinks += 1
+      continue
+    }
+    errors.push(
+      `Section "${sectionTitle}" contains a line that is not a Markdown link entry: ${line.slice(0, 120)}`,
+    )
+  }
+  if (inFileList && sectionLinks === 0) {
+    errors.push(`Section "${sectionTitle}" has no Markdown links.`)
+  }
+  return [...new Set(errors)]
 }
 
 export function renderLlmsTxt(
@@ -201,7 +368,12 @@ export function renderLlmsTxt(
   for (const section of resolved.sections) {
     lines.push('', `## ${section.heading.trim()}`, '', ...section.lines)
   }
-  return `${lines.join('\n')}\n`
+  const rendered = `${lines.join('\n')}\n`
+  const errors = validateLlmsTxtV2(rendered)
+  if (errors.length > 0) {
+    throw new Error(`Invalid llms.txt v2 output: ${errors.join(' ')}`)
+  }
+  return rendered
 }
 
 function markdownBody(markdown: string): string {
@@ -215,6 +387,8 @@ function markdownBody(markdown: string): string {
  * Create an optional one-file export from the same selected pages as
  * `renderLlmsTxt`. `llms-full.txt` is a convenience format, not part of the
  * llms.txt v2 proposal.
+ * @deprecated The v2 proposal removed context-expansion tooling. Keep this
+ * only for a known consumer that still requires the legacy export.
  */
 export function renderLlmsFullTxt(
   manifest: AgentRouteManifest,

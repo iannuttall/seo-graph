@@ -7,8 +7,10 @@ Astro layer for
 
 - `agentMarkdown()` — build integration emitting a deterministic `.md` twin
   for every built content page, `agent-routes.json`, `llms.txt`, and injected
-  alternate and `llms.txt` discovery links. Scoped `llms.txt` and an optional
-  `llms-full.txt` export are supported.
+  alternate and `llms.txt` discovery links. One site can publish overlapping
+  scoped files. Each page points to the most specific file that covers it.
+  Builds also warn when a trailing-slash page moves from `/page.md` to the v2
+  `/page/index.md` form. The warning does not change files or stop the build.
 - `agentMarkdownMiddleware()` — live Markdown twins for `prerender = false`
   pages and opt-in `Accept: text/markdown` negotiation on any Astro adapter.
 - `createMarkdownEndpoint()` — serve collection pages' Markdown from the
@@ -28,6 +30,9 @@ Runtime negotiation is off by default. Static sites keep their current build
 and hosting behavior. Enable the default package middleware with
 `agentMarkdown({ runtimeMiddleware: true })`, or configure
 `agentMarkdownMiddleware({ contentNegotiation: true })` in `src/middleware.ts`.
+After you add redirects for old Markdown URLs, set
+`agentMarkdown({ routeMigrationWarnings: false })` to hide the migration
+warning.
 
 ```sh
 pnpm add @iannuttall/seo-graph-astro @iannuttall/seo-graph-core

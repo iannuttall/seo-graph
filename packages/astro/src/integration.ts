@@ -3,11 +3,13 @@ import { dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { AstroConfig, AstroIntegration } from 'astro'
 import {
+  auditMarkdownRouteMigrations,
   canonicalFromHtml,
   injectAgentDiscoveryLinks,
   isNoindexHtml,
   isRedirectHtml,
   llmsTxtCoversPath,
+  llmsTxtPathForPage,
   normalizeLlmsTxtPath,
 } from '@iannuttall/seo-graph-core'
 import {
@@ -37,8 +39,12 @@ export interface AgentLlmsFullTxtOptions {
 export interface AgentMarkdownIntegrationOptions {
   excludeSelectors?: readonly string[]
   manifestFile?: string
-  llmsTxt?: AgentLlmsTxtOptions
-  /** Optional one-file export. Disabled by default and requires `llmsTxt`. */
+  /** One llms.txt file, or several scoped files. The most specific scope wins. */
+  llmsTxt?: AgentLlmsTxtOptions | readonly AgentLlmsTxtOptions[]
+  /**
+   * Legacy one-file export. Disabled by default and requires one `llmsTxt`.
+   * @deprecated The llms.txt v2 proposal removed context-expansion tooling.
+   */
   llmsFullTxt?: boolean | AgentLlmsFullTxtOptions
   /**
    * Add package middleware for live twins and canonical URL content
@@ -46,6 +52,11 @@ export interface AgentMarkdownIntegrationOptions {
    * directly when you need custom runtime options.
    */
   runtimeMiddleware?: boolean
+  /**
+   * Warn when a trailing-slash page moves from a legacy flat `.md` URL to
+   * the llms.txt v2 `index.md` form. Defaults to `true`.
+   */
+  routeMigrationWarnings?: boolean
   strict?: boolean
   /**
    * Append per-file rules for every generated `.md` route to the build's
@@ -179,7 +190,7 @@ export async function writeAgentMarkdownArtifacts(input: {
   base?: string
   excludeSelectors?: readonly string[]
   manifestFile?: string
-  llmsTxt?: AgentLlmsTxtOptions
+  llmsTxt?: AgentLlmsTxtOptions | readonly AgentLlmsTxtOptions[]
   llmsFullTxt?: boolean | AgentLlmsFullTxtOptions
   cloudflareHeaders?: boolean
   outputDir: string
@@ -190,12 +201,21 @@ export async function writeAgentMarkdownArtifacts(input: {
   if (input.llmsFullTxt && !input.llmsTxt) {
     throw new Error('llmsFullTxt requires an llmsTxt configuration')
   }
-  const llmsTxtPath = input.llmsTxt
-    ? resolveLlmsTxtPublicPath(input.llmsTxt.outputPath, input.base)
-    : undefined
-  const llmsTxtUrl = llmsTxtPath
-    ? new URL(llmsTxtPath, site).toString()
-    : undefined
+  const llmsTxtConfigs = input.llmsTxt
+    ? (Array.isArray(input.llmsTxt) ? input.llmsTxt : [input.llmsTxt]).map(
+        (config) => {
+          const path = resolveLlmsTxtPublicPath(config.outputPath, input.base)
+          return { config, path }
+        },
+      )
+    : []
+  const llmsTxtPaths = llmsTxtConfigs.map((item) => item.path)
+  if (new Set(llmsTxtPaths).size !== llmsTxtPaths.length) {
+    throw new Error('llmsTxt output paths must be unique')
+  }
+  if (input.llmsFullTxt && llmsTxtConfigs.length !== 1) {
+    throw new Error('llmsFullTxt supports exactly one llmsTxt configuration')
+  }
   const prepared: Array<{
     entry: AgentRouteManifestEntry
     html: string
@@ -226,12 +246,15 @@ export async function writeAgentMarkdownArtifacts(input: {
       excludeSelectors: input.excludeSelectors,
     })
     const absoluteMarkdownUrl = new URL(route.markdownPath, site).toString()
+    const describedByPath = llmsTxtPathForPage(
+      llmsTxtPaths,
+      canonical.pathname,
+    )
     const injectedHtml = injectAgentDiscoveryLinks(html, {
       markdownUrl: absoluteMarkdownUrl,
-      llmsTxtUrl:
-        llmsTxtPath && llmsTxtCoversPath(llmsTxtPath, canonical.pathname)
-          ? llmsTxtUrl
-          : undefined,
+      llmsTxtUrl: describedByPath
+        ? new URL(describedByPath, site).toString()
+        : undefined,
     })
     const bytes = Buffer.byteLength(rendered.markdown)
     prepared.push({
@@ -296,22 +319,22 @@ export async function writeAgentMarkdownArtifacts(input: {
     renderAgentRouteManifest(site.origin, manifest.pages),
     'utf8',
   )
-  if (input.llmsTxt) {
+  for (const llmsTxt of llmsTxtConfigs) {
     const scopedManifest: AgentRouteManifest = {
       ...manifest,
       pages: manifest.pages.filter((page) =>
-        llmsTxtCoversPath(llmsTxtPath!, page.htmlPath),
+        llmsTxtCoversPath(llmsTxt.path, page.htmlPath),
       ),
     }
     const llmsFile = outputFileForPublicPath(
       outputDir,
-      llmsTxtPath!,
+      llmsTxt.path,
       input.base,
     )
     await mkdir(dirname(llmsFile), { recursive: true })
     await writeFile(
       llmsFile,
-      renderLlmsTxt(scopedManifest, input.llmsTxt),
+      renderLlmsTxt(scopedManifest, llmsTxt.config),
       'utf8',
     )
     if (input.llmsFullTxt) {
@@ -319,7 +342,7 @@ export async function writeAgentMarkdownArtifacts(input: {
         typeof input.llmsFullTxt === 'object' ? input.llmsFullTxt : {}
       const fullPath = resolveLlmsFullTxtPublicPath(
         fullOptions.outputPath,
-        llmsTxtPath!,
+        llmsTxt.path,
       )
       const fullFile = outputFileForPublicPath(
         outputDir,
@@ -334,7 +357,7 @@ export async function writeAgentMarkdownArtifacts(input: {
         fullFile,
         renderLlmsFullTxt(
           scopedManifest,
-          input.llmsTxt,
+          llmsTxt.config,
           markdownByHtmlPath,
         ),
         'utf8',
@@ -355,12 +378,14 @@ export async function writeAgentMarkdownArtifacts(input: {
     ).trimEnd()
     const rules = manifest.pages.map((page) => {
       const linkValues = [`<${page.canonical}>; rel="canonical"`]
-      if (
-        llmsTxtPath &&
-        llmsTxtUrl &&
-        llmsTxtCoversPath(llmsTxtPath, page.htmlPath)
-      ) {
-        linkValues.push(`<${llmsTxtUrl}>; rel="describedby"`)
+      const describedByPath = llmsTxtPathForPage(
+        llmsTxtPaths,
+        page.htmlPath,
+      )
+      if (describedByPath) {
+        linkValues.push(
+          `<${new URL(describedByPath, site)}>; rel="describedby"`,
+        )
       }
       return [
         page.markdownPath,
@@ -423,6 +448,28 @@ export function agentMarkdown(
           ),
           site: config.site.toString(),
         })
+        if (options.routeMigrationWarnings !== false) {
+          const migrations = auditMarkdownRouteMigrations(
+            pages.map((page) => page.canonical),
+            config.base,
+          )
+          if (migrations.length > 0) {
+            logger.warn(
+              `${migrations.length} Markdown route${migrations.length === 1 ? '' : 's'} changed to the llms.txt v2 directory form:`,
+            )
+            for (const migration of migrations.slice(0, 20)) {
+              logger.warn(
+                `${migration.htmlPath}: ${migration.legacyMarkdownPath} -> ${migration.v2MarkdownPath}`,
+              )
+            }
+            if (migrations.length > 20) {
+              logger.warn(`${migrations.length - 20} more route changes.`)
+            }
+            logger.warn(
+              'Add redirects from the legacy Markdown URLs, then set routeMigrationWarnings to false after migration.',
+            )
+          }
+        }
         logger.info(`Generated ${pages.length} Markdown alternatives.`)
       },
     },

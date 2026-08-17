@@ -4,6 +4,12 @@ export interface MarkdownRoute {
   markdownPath: string
 }
 
+export interface MarkdownRouteMigration {
+  htmlPath: string
+  legacyMarkdownPath: string
+  v2MarkdownPath: string
+}
+
 function normalizedBase(base: string): string {
   if (!base.startsWith('/')) throw new Error('Base path must start with /')
   const value = base.replace(/\/+$/u, '') || '/'
@@ -79,24 +85,65 @@ export function markdownRouteForPath(
       ? canonicalPath.slice(1)
       : canonicalPath.slice(basePath.length).replace(/^\//u, '')
   const relativeSegments = relativePath ? relativePath.split('/') : []
+  const directoryRoute = pathname.endsWith('/')
   const markdownSegments =
     relativeSegments.length === 0
       ? ['index.md']
-      : [
-          ...relativeSegments.slice(0, -1),
-          `${relativeSegments.at(-1) ?? ''}.md`,
-        ]
+      : directoryRoute
+        ? [...relativeSegments, 'index.md']
+        : [
+            ...relativeSegments.slice(0, -1),
+            `${relativeSegments.at(-1) ?? ''}.md`,
+          ]
   const publicPrefix = basePath === '/' ? '' : basePath
   const markdownPath = `${publicPrefix}/${markdownSegments.join('/')}`
   const filePath = markdownSegments
     .map((segment) => decodeURIComponent(segment))
     .join('/')
+  const htmlPath =
+    directoryRoute && canonicalPath !== '/'
+      ? `${canonicalPath}/`
+      : canonicalPath
 
   return {
-    htmlPath: canonicalPath,
+    htmlPath,
     markdownPath,
     filePath,
   }
+}
+
+/**
+ * Report routes whose Markdown URL changes under the llms.txt v2 directory
+ * convention. This function only reads route strings and changes no files.
+ */
+export function auditMarkdownRouteMigrations(
+  routes: readonly (string | URL)[],
+  base = '/',
+): MarkdownRouteMigration[] {
+  const migrations = new Map<string, MarkdownRouteMigration>()
+  for (const value of routes) {
+    const pathname =
+      value instanceof URL
+        ? value.pathname
+        : value.startsWith('/')
+          ? value
+          : new URL(value).pathname
+    const route = markdownRouteForPath(pathname, base)
+    if (!pathname.endsWith('/') || route.filePath === 'index.md') continue
+    const legacyMarkdownPath = route.markdownPath.replace(
+      /\/index\.md$/u,
+      '.md',
+    )
+    if (legacyMarkdownPath === route.markdownPath) continue
+    migrations.set(route.htmlPath, {
+      htmlPath: route.htmlPath,
+      legacyMarkdownPath,
+      v2MarkdownPath: route.markdownPath,
+    })
+  }
+  return [...migrations.values()].sort((left, right) =>
+    left.htmlPath.localeCompare(right.htmlPath, 'en-US'),
+  )
 }
 
 export function htmlPathForMarkdownPath(pathname: string, base = '/'): string {
@@ -115,6 +162,13 @@ export function htmlPathForMarkdownPath(pathname: string, base = '/'): string {
       ? canonicalPath.slice(1)
       : canonicalPath.slice(basePath.length).replace(/^\//u, '')
   if (relativePath === 'index.md') return basePath
+
+  if (relativePath.endsWith('/index.md')) {
+    const htmlRelativePath = relativePath.slice(0, -'/index.md'.length)
+    return basePath === '/'
+      ? `/${htmlRelativePath}/`
+      : `${basePath}/${htmlRelativePath}/`
+  }
 
   const htmlRelativePath = relativePath.slice(0, -'.md'.length)
   if (!htmlRelativePath) {

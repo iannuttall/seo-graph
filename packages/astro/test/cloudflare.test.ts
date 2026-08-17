@@ -21,9 +21,12 @@ function fixtureAssets(): {
     async fetch(request) {
       calls.push(request.clone())
       const url = new URL(request.url)
-      const isMarkdown = ['/docs.md', '/index.md', '/privacy.md'].includes(
-        url.pathname,
-      )
+      const isMarkdown = [
+        '/docs.md',
+        '/docs/index.md',
+        '/index.md',
+        '/privacy.md',
+      ].includes(url.pathname)
       if (isMarkdown) {
         const headers = new Headers({
           'Cache-Control': 'public, max-age=60',
@@ -168,6 +171,28 @@ test('keeps HTML as the default and preserves existing Link values', async () =>
   assert.equal(response.headers.get('Vary'), 'Accept')
   assert.equal(response.headers.get('ETag'), '"html-etag"')
 })
+
+test('keeps the trailing slash contract for directory Markdown routes', async () => {
+  const assets = fixtureAssets()
+  const html = await handler()(
+    new Request('https://example.com/docs/'),
+    assets,
+  )
+  assert.match(
+    html.headers.get('Link') ?? '',
+    /<https:\/\/example\.com\/docs\/index\.md>; rel="alternate"/u,
+  )
+
+  const markdownResponse = await handler()(
+    new Request('https://example.com/docs/index.md'),
+    assets,
+  )
+  assert.match(
+    markdownResponse.headers.get('Link') ?? '',
+    /<https:\/\/example\.com\/docs\/>; rel="canonical"/u,
+  )
+})
+
 
 test('GET and HEAD select the same Markdown headers without a HEAD body', async () => {
   const assets = fixtureAssets()
@@ -331,4 +356,23 @@ test('adds scoped llms.txt discovery links when configured', async () => {
     fixtureAssets(),
   )
   assert.doesNotMatch(outside.headers.get('Link') ?? '', /describedby/u)
+})
+
+test('uses the most specific llms.txt scope when several files apply', async () => {
+  const scoped = createCloudflareMarkdownHandler({
+    llmsTxtPath: ['/llms.txt', '/docs/llms.txt'],
+    site: 'https://example.com',
+  })
+  const response = await scoped(
+    new Request('https://example.com/docs/start'),
+    fixtureAssets(),
+  )
+  assert.match(
+    response.headers.get('Link') ?? '',
+    /<https:\/\/example\.com\/docs\/llms\.txt>; rel="describedby"/u,
+  )
+  assert.doesNotMatch(
+    response.headers.get('Link') ?? '',
+    /<https:\/\/example\.com\/llms\.txt>; rel="describedby"/u,
+  )
 })

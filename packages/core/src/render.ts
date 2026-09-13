@@ -203,12 +203,13 @@ export function renderAgentMarkdown(
   ])
   normalizeUrls(root, url)
 
-  const body = normalizeMarkdown(markdownService().turndown(root.innerHTML))
-  const h1Count = (body.match(/^#\s+/gmu) ?? []).length
+  const h1Count = root.querySelectorAll('h1').length
   if (h1Count !== 1) throw new Error(`Expected one H1, found ${h1Count}`)
-  if (/<(?:script|style|svg|canvas)\b/iu.test(body)) {
+  if (root.querySelector('script, style, svg, canvas')) {
     throw new Error('Rendered Markdown contains excluded markup')
   }
+
+  const body = normalizeMarkdown(markdownService().turndown(root.innerHTML))
 
   const markdown = `${serializeAgentFrontmatter(metadata)}\n\n${body}`
   return {

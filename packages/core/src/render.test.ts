@@ -246,3 +246,58 @@ test('rejects a page without a stable content root', () => {
     /Missing main or \[data-agent-content\] content root/u,
   )
 })
+
+test('counts real H1 elements, not shell comments in fenced code', () => {
+  const html = `<!doctype html>
+    <html lang="en"><head>
+      <title>Install | SEO Skill</title>
+      <meta name="description" content="Install the CLI.">
+      <link rel="canonical" href="https://seoskill.dev/docs/install">
+    </head><body><main>
+      <h1>Install</h1>
+      <p>Run these commands.</p>
+      <pre><code class="language-sh"># install deps\nnpm i -g seo\n# start the server\nseo start\n</code></pre>
+    </main></body></html>`
+
+  const rendered = renderAgentMarkdown(html, 'https://seoskill.dev/docs/install')
+
+  assert.equal(
+    rendered.markdown,
+    `---
+title: "Install | SEO Skill"
+description: "Install the CLI."
+canonical: "https://seoskill.dev/docs/install"
+language: "en"
+---
+
+# Install
+
+Run these commands.
+
+\`\`\`sh
+# install deps
+npm i -g seo
+# start the server
+seo start
+\`\`\`
+`,
+  )
+})
+
+test('rejects a page with two real H1 elements', () => {
+  const html = `<!doctype html>
+    <html lang="en"><head>
+      <title>Two headings</title>
+      <meta name="description" content="Two headings.">
+      <link rel="canonical" href="https://seoskill.dev/two">
+    </head><body><main>
+      <h1>First</h1>
+      <p>Text.</p>
+      <h1>Second</h1>
+    </main></body></html>`
+
+  assert.throws(
+    () => renderAgentMarkdown(html, 'https://seoskill.dev/two'),
+    /Expected one H1, found 2/u,
+  )
+})

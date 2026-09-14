@@ -65,6 +65,13 @@ export default defineConfig({
 });
 ```
 
+The build adds one wildcard `_headers` rule for all Markdown twins, including
+nested paths and `/page/index.md`. It also adds scope rules when `llmsTxt` is
+set. Set `cloudflareHeaders: 'per-page'` to restore canonical and token headers
+for each page; the build fails if the total exceeds Cloudflare's 100-rule
+limit. Set `cloudflareHeaders: false` to disable this output. See the
+[header options](./packages/astro/README.md#static-markdown-headers).
+
 ## Develop
 
 ```sh

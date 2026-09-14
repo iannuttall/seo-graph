@@ -38,6 +38,42 @@ warning.
 pnpm add @iannuttall/seo-graph-astro @iannuttall/seo-graph-core
 ```
 
+## Static Markdown headers
+
+By default, `agentMarkdown()` appends this block to the build's `_headers`:
+
+```text
+# Generated agent markdown headers. Do not edit in build output.
+/*.md
+  ! Vary
+  Content-Type: text/markdown; charset=utf-8
+  Vary: Accept
+```
+
+Cloudflare's `*` also matches slashes, so this one rule covers `/post/slug.md`
+and `/post/slug/index.md`. A separate `/*/index.md` rule is not needed.
+With an Astro base of `/docs`, the pattern is `/docs/*.md`.
+
+The default has no per-page canonical `Link` or `X-Markdown-Tokens` headers.
+Each twin keeps its canonical URL in frontmatter. Token counts stay in
+`agent-routes.json`.
+
+When `llmsTxt` is set, each scope gets a `describedby` rule such as
+`/docs/*.md`. A slashless scope root also gets `/docs.md` when that twin
+exists. The root scope shares the main wildcard block. Scopes run from broad
+to narrow and reset `Link`, so the most specific scope wins.
+
+| `cloudflareHeaders` | Output |
+| --- | --- |
+| omitted or `true` | Wildcard rules, independent of page count. |
+| `'per-page'` | One rule per twin, with canonical `Link`, optional `describedby`, and `X-Markdown-Tokens`. The build fails above 100 total rules, including existing site rules. |
+| `false` | No `_headers` write. |
+
+Existing site rules before the generated marker are kept. Repeated builds
+replace the generated section and produce the same bytes. Cloudflare permits
+[up to 100 rules per `_headers` file](https://developers.cloudflare.com/pages/configuration/headers/),
+so allow room for site rules and scopes even in wildcard mode.
+
 Full reference and recipes:
 [AGENTS.md](https://github.com/iannuttall/seo-graph/blob/main/AGENTS.md).
 

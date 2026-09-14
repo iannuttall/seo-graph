@@ -59,12 +59,13 @@ export interface AgentMarkdownIntegrationOptions {
   routeMigrationWarnings?: boolean
   strict?: boolean
   /**
-   * Append per-file rules for every generated `.md` route to the build's
-   * `_headers` file (Cloudflare/Netlify format): `Content-Type`, a
-   * canonical `Link`, `Vary: Accept`, and `X-Markdown-Tokens`. Enabled by
-   * default; pass `false` on hosts that don't read `_headers`.
+   * Append wildcard rules to the build's `_headers` file by default:
+   * `Content-Type`, `Vary: Accept`, and optional scoped `describedby` links.
+   * Pass `"per-page"` to include canonical `Link` and `X-Markdown-Tokens`
+   * for each twin. This mode fails if existing and generated rules exceed
+   * Cloudflare's 100-rule limit. Pass `false` to disable header output.
    */
-  cloudflareHeaders?: boolean
+  cloudflareHeaders?: boolean | 'per-page'
 }
 
 type BuildConfig = Pick<AstroConfig, 'base' | 'build' | 'output' | 'site'>
@@ -192,7 +193,7 @@ export async function writeAgentMarkdownArtifacts(input: {
   manifestFile?: string
   llmsTxt?: AgentLlmsTxtOptions | readonly AgentLlmsTxtOptions[]
   llmsFullTxt?: boolean | AgentLlmsFullTxtOptions
-  cloudflareHeaders?: boolean
+  cloudflareHeaders?: AgentMarkdownIntegrationOptions['cloudflareHeaders']
   outputDir: string
   site: string
 }): Promise<AgentRouteManifestEntry[]> {
@@ -376,26 +377,79 @@ export async function writeAgentMarkdownArtifacts(input: {
     const existing = (
       markerIndex === -1 ? existingRaw : existingRaw.slice(0, markerIndex)
     ).trimEnd()
-    const rules = manifest.pages.map((page) => {
-      const linkValues = [`<${page.canonical}>; rel="canonical"`]
-      const describedByPath = llmsTxtPathForPage(
-        llmsTxtPaths,
-        page.htmlPath,
-      )
-      if (describedByPath) {
-        linkValues.push(
-          `<${new URL(describedByPath, site)}>; rel="describedby"`,
+    let rules: string[]
+    if (input.cloudflareHeaders === 'per-page') {
+      const existingRuleCount = existing.split(/\r?\n/u).filter((line) =>
+        /^(?:\/|https:\/\/)/u.test(line.trim()),
+      ).length
+      const totalRuleCount = existingRuleCount + manifest.pages.length
+      if (totalRuleCount > 100) {
+        throw new Error(
+          `_headers would contain ${totalRuleCount} rules, exceeding Cloudflare's limit of 100. Use cloudflareHeaders: true for wildcard rules, or false to manage headers yourself.`,
         )
       }
-      return [
-        page.markdownPath,
-        '  ! Vary',
-        '  Content-Type: text/markdown; charset=utf-8',
-        `  Link: ${linkValues.join(', ')}`,
-        '  Vary: Accept',
-        `  X-Markdown-Tokens: ${page.tokens}`,
-      ].join('\n')
-    })
+      rules = manifest.pages.map((page) => {
+        const linkValues = [`<${page.canonical}>; rel="canonical"`]
+        const describedByPath = llmsTxtPathForPage(
+          llmsTxtPaths,
+          page.htmlPath,
+        )
+        if (describedByPath) {
+          linkValues.push(
+            `<${new URL(describedByPath, site)}>; rel="describedby"`,
+          )
+        }
+        return [
+          page.markdownPath,
+          '  ! Vary',
+          '  Content-Type: text/markdown; charset=utf-8',
+          `  Link: ${linkValues.join(', ')}`,
+          '  Vary: Accept',
+          `  X-Markdown-Tokens: ${page.tokens}`,
+        ].join('\n')
+      })
+    } else {
+      const base = normalizedBase(input.base)
+      // Cloudflare's single splat matches slashes too, so this also covers
+      // nested twins and directory-form /page/index.md without duplicate headers.
+      const markdownPattern = `${base === '/' ? '' : base}/*.md`
+      const wildcardRules = new Map<string, string[]>()
+      if (manifest.pages.length > 0) {
+        wildcardRules.set(markdownPattern, [
+          '  ! Vary',
+          '  Content-Type: text/markdown; charset=utf-8',
+          '  Vary: Accept',
+        ])
+      }
+      // Apply broad scopes first. Reset Link in each narrower scope so only
+      // the most specific describedby link remains, as in the HTML output.
+      const sortedPaths = [...llmsTxtPaths].sort((left, right) =>
+        left.length - right.length || left.localeCompare(right, 'en-US'),
+      )
+      for (const path of sortedPaths) {
+        if (!manifest.pages.some((page) => llmsTxtCoversPath(path, page.htmlPath))) {
+          continue
+        }
+        const scope = path.slice(0, -'/llms.txt'.length)
+        const patterns = [`${scope}/*.md`]
+        // A slashless scope root maps to /docs.md, outside /docs/*.md.
+        if (manifest.pages.some((page) =>
+          page.htmlPath === scope && page.markdownPath === `${scope}.md`,
+        )) {
+          patterns.push(`${scope}.md`)
+        }
+        for (const pattern of patterns) {
+          wildcardRules.set(pattern, [
+            ...(wildcardRules.get(pattern) ?? []),
+            '  ! Link',
+            `  Link: <${new URL(path, site)}>; rel="describedby"`,
+          ])
+        }
+      }
+      rules = [...wildcardRules].map(([pattern, headers]) =>
+        [pattern, ...headers].join('\n'),
+      )
+    }
     await writeFile(
       headersPath,
       `${existing}${existing ? '\n\n' : ''}${HEADERS_MARKER}\n${rules.join('\n\n')}\n`,

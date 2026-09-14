@@ -53,6 +53,27 @@ async function artifactHash(directory: string): Promise<string> {
   return createHash('sha256').update(Buffer.concat(values)).digest('hex')
 }
 
+// Apply the documented Cloudflare splat and ordered set/unset behavior to
+// generated path rules, so scope tests check the headers a request receives.
+function headersForPath(source: string, path: string): Headers {
+  const headers = new Headers()
+  let matches = false
+  for (const line of source.split('\n')) {
+    if (line.startsWith('/')) {
+      const pattern = line.split('*').map((part) =>
+        part.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'),
+      ).join('.*')
+      matches = new RegExp(`^${pattern}$`, 'u').test(path)
+    } else if (matches && line.startsWith('  ! ')) {
+      headers.delete(line.slice(4))
+    } else if (matches && line.startsWith('  ')) {
+      const colon = line.indexOf(':')
+      headers.append(line.slice(2, colon), line.slice(colon + 1).trim())
+    }
+  }
+  return headers
+}
+
 test('writes one deterministic artifact for each public content page', async () => {
   const directory = await fixtureDirectory()
   try {
@@ -172,7 +193,7 @@ test('supports directory, file, and mixed static build layouts', async () => {
   }
 })
 
-test('appends idempotent per-file markdown headers to _headers', async () => {
+test('appends idempotent per-file markdown headers to _headers when requested', async () => {
   const directory = await fixtureDirectory()
   try {
     await writeFile(
@@ -181,6 +202,7 @@ test('appends idempotent per-file markdown headers to _headers', async () => {
       'utf8',
     )
     await writeAgentMarkdownArtifacts({
+      cloudflareHeaders: 'per-page',
       outputDir: directory,
       site: 'https://example.com',
       llmsTxt,
@@ -193,12 +215,101 @@ test('appends idempotent per-file markdown headers to _headers', async () => {
       first.includes('Link: <https://example.com/>; rel="canonical"'),
     )
     await writeAgentMarkdownArtifacts({
+      cloudflareHeaders: 'per-page',
       outputDir: directory,
       site: 'https://example.com',
       llmsTxt,
     })
     const second = await readFile(join(directory, '_headers'), 'utf8')
     assert.equal(second, first)
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
+})
+
+test('uses one wildcard rule for 150 pages, including nested and directory paths', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'seo-astro-headers-'))
+  try {
+    await mkdir(join(directory, 'post'), { recursive: true })
+    for (let index = 0; index < 150; index++) {
+      await writeFile(
+        join(directory, 'post', `${index}.html`),
+        page(`/post/${index}${index % 2 ? '/' : ''}`, `Post ${index}`),
+      )
+    }
+    const siteHeaders = '# Site headers\n/*\n  Vary: Accept\n  X-Site: example\n'
+    await writeFile(join(directory, '_headers'), siteHeaders)
+    const options = { outputDir: directory, site: 'https://example.com' }
+    const manifest = await writeAgentMarkdownArtifacts(options)
+    const first = await readFile(join(directory, '_headers'), 'utf8')
+    assert.equal(manifest.length, 150)
+    assert.ok(first.startsWith(siteHeaders))
+    const patterns = first.split('\n').filter((line) => line.startsWith('/'))
+    assert.deepEqual(patterns, ['/*', '/*.md'])
+    for (const path of [
+      '/post/slug.md', '/post/slug/index.md', '/index.md',
+      ...manifest.map((entry) => entry.markdownPath),
+    ]) {
+      const response = headersForPath(first, path)
+      assert.equal(response.get('Content-Type'), 'text/markdown; charset=utf-8')
+      assert.equal(response.get('Vary'), 'Accept')
+    }
+    assert.equal(headersForPath(first, '/post/slug.html').get('Content-Type'), null)
+    assert.doesNotMatch(first, /Link:|X-Markdown-Tokens/u)
+    await writeAgentMarkdownArtifacts(options)
+    assert.equal(await readFile(join(directory, '_headers'), 'utf8'), first)
+    await assert.rejects(
+      writeAgentMarkdownArtifacts({ ...options, cloudflareHeaders: 'per-page' }),
+      /151 rules.*100.*cloudflareHeaders/u,
+    )
+    assert.equal(await readFile(join(directory, '_headers'), 'utf8'), first)
+    await writeAgentMarkdownArtifacts({
+      ...options,
+      llmsTxt: [
+        { title: 'All pages' },
+        { title: 'Posts', outputPath: '/post/llms.txt' },
+      ],
+    })
+    const scoped = await readFile(join(directory, '_headers'), 'utf8')
+    assert.deepEqual(
+      scoped.split('\n').filter((line) => line.startsWith('/')),
+      ['/*', '/*.md', '/post/*.md'],
+    )
+    assert.equal(
+      headersForPath(scoped, '/post/slug/index.md').get('Link'),
+      '<https://example.com/post/llms.txt>; rel="describedby"',
+    )
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
+})
+
+test('counts existing site rules at the per-page limit and replaces old generated rules', async () => {
+  const directory = await fixtureDirectory()
+  try {
+    const siteHeaders = Array.from({ length: 98 }, (_, index) =>
+      `${index % 2 ? 'https://example.com' : ''}/site-${index}\n  X-Site: yes\n`,
+    ).join('\n')
+    const headersPath = join(directory, '_headers')
+    await writeFile(headersPath, `# Site rules\n${siteHeaders}`)
+    const options = { outputDir: directory, site: 'https://example.com' }
+    await writeAgentMarkdownArtifacts({ ...options, cloudflareHeaders: 'per-page' })
+    const first = await readFile(headersPath, 'utf8')
+    await writeAgentMarkdownArtifacts({ ...options, cloudflareHeaders: 'per-page' })
+    assert.equal(await readFile(headersPath, 'utf8'), first)
+    await writeFile(headersPath, `/another\n  X-Site: yes\n${first}`)
+    await assert.rejects(
+      writeAgentMarkdownArtifacts({ ...options, cloudflareHeaders: 'per-page' }),
+      /101 rules.*100/u,
+    )
+    await writeAgentMarkdownArtifacts({ ...options, cloudflareHeaders: true })
+    const wildcard = await readFile(headersPath, 'utf8')
+    assert.ok(wildcard.includes(siteHeaders.trimEnd()))
+    assert.doesNotMatch(wildcard, /X-Markdown-Tokens|rel="canonical"/u)
+    assert.equal(
+      wildcard.split('\n').filter((line) => /^(\/|https:\/\/)/u.test(line)).length,
+      100,
+    )
   } finally {
     await rm(directory, { force: true, recursive: true })
   }
@@ -314,6 +425,22 @@ test('writes overlapping llms.txt scopes and advertises the most specific file',
       headers,
       /\/docs\.md[\s\S]*<https:\/\/example\.com\/docs\/llms\.txt>; rel="describedby"/u,
     )
+    for (const path of ['/docs.md', '/docs/guide.md', '/docs/guide/index.md']) {
+      const response = headersForPath(headers, path)
+      assert.equal(
+        response.get('Link'),
+        '<https://example.com/docs/llms.txt>; rel="describedby"',
+      )
+      assert.equal(response.get('Content-Type'), 'text/markdown; charset=utf-8')
+      assert.equal(response.get('Vary'), 'Accept')
+    }
+    for (const path of ['/index.md', '/docs-other/guide.md']) {
+      assert.equal(
+        headersForPath(headers, path).get('Link'),
+        '<https://example.com/llms.txt>; rel="describedby"',
+      )
+    }
+    assert.equal(headersForPath(headers, '/docs/guide.html').get('Link'), null)
   } finally {
     await rm(directory, { force: true, recursive: true })
   }
@@ -436,6 +563,18 @@ test('places default llms.txt inside the public Astro base', async () => {
       await readFile(join(directory, 'index.html'), 'utf8'),
       /href="https:\/\/example\.com\/seo\/llms\.txt"/u,
     )
+    const headers = await readFile(join(directory, '_headers'), 'utf8')
+    assert.deepEqual(
+      headers.split('\n').filter((line) => line.startsWith('/')),
+      ['/seo/*.md'],
+    )
+    const response = headersForPath(headers, '/seo/index.md')
+    assert.equal(response.get('Content-Type'), 'text/markdown; charset=utf-8')
+    assert.equal(
+      response.get('Link'),
+      '<https://example.com/seo/llms.txt>; rel="describedby"',
+    )
+    assert.equal(headersForPath(headers, '/index.md').get('Content-Type'), null)
   } finally {
     await rm(directory, { force: true, recursive: true })
   }

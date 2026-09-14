@@ -2422,6 +2422,25 @@ export default defineConfig({
 Status and redirect pages are skipped. A noindex page keeps noindex on its
 Markdown response. The Markdown twin of a page shares its canonical URL.
 
+`cloudflareHeaders` controls the build's `_headers` output:
+
+- Omitted or `true` (default): one `/*.md` rule with `! Vary`,
+  `Content-Type: text/markdown; charset=utf-8`, and `Vary: Accept`. The pattern
+  includes the Astro base when set. Cloudflare's `*` matches slashes, so it
+  covers both nested paths and `/page/index.md` without a second rule.
+- `'per-page'`: the previous output, with canonical `Link` and
+  `X-Markdown-Tokens` for each twin. The build fails if existing site rules
+  plus generated rules exceed Cloudflare's 100-rule limit.
+- `false`: do not write `_headers`.
+
+The default keeps canonical URLs in Markdown frontmatter and token counts in
+the manifest. Configured `llmsTxt` files add one `describedby` rule per scope
+pattern, plus a rule for a slashless scope root such as `/docs.md` if present.
+The root scope shares the main wildcard rule. Narrower scopes reset `Link`
+after broader scopes, so the most specific file wins. Existing site rules
+before the generated marker are kept, and repeated builds replace that
+section with identical bytes.
+
 ## Live markdown for server-rendered pages
 
 `agentMarkdownMiddleware()` makes a page's Markdown twin inherit the page's

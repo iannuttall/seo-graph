@@ -8,12 +8,18 @@ import {
   markdownRouteForPath,
   renderAgentMarkdown,
 } from '@iannuttall/seo-graph-core'
+import { isExcludedPath } from './exclude-paths.js'
 
 export interface AgentMarkdownMiddlewareOptions {
   /** Deployment base path, matching the Astro `base` option. */
   base?: string
   /** Extra selectors to strip, on top of the default exclusion contract. */
   excludeSelectors?: readonly string[]
+  /**
+   * Page paths that get no Markdown twin and no alternate link, such as
+   * signed-in routes. Exact paths or prefixes ending in `/*`.
+   */
+  excludePaths?: readonly string[]
   /**
    * Serve Markdown at the canonical HTML URL when `Accept` prefers
    * `text/markdown`. Defaults to `false` for backward compatibility.
@@ -128,7 +134,8 @@ export function agentMarkdownMiddleware(
     if (!pathname.endsWith('.md')) {
       if (
         response.status !== 200 ||
-        !isHtmlResponse(response)
+        !isHtmlResponse(response) ||
+        isExcludedPath(options.excludePaths, pathname)
       ) {
         return response
       }
@@ -157,8 +164,6 @@ export function agentMarkdownMiddleware(
         } catch {
           return response
         }
-        // Only public pages get a Markdown twin.
-        if (isNoindexHtml(html)) return response
         const canonical =
           canonicalFromHtml(html) ?? new URL(pathname, baseUrl).toString()
         try {
@@ -167,6 +172,9 @@ export function agentMarkdownMiddleware(
             const headers = new Headers(ownMarkdown.headers)
             mergeVary(headers, 'Accept')
             appendDiscoveryLinks(headers, { canonical, describedBy })
+            if (isNoindexHtml(html)) {
+              headers.set('X-Robots-Tag', 'noindex, follow')
+            }
             if (options.contentSignal) {
               headers.set('Content-Signal', options.contentSignal)
             }
@@ -190,6 +198,9 @@ export function agentMarkdownMiddleware(
           headers.set('X-Markdown-Tokens', String(rendered.tokenEstimate))
           mergeVary(headers, 'Accept')
           appendDiscoveryLinks(headers, { canonical, describedBy })
+          if (isNoindexHtml(html)) {
+            headers.set('X-Robots-Tag', 'noindex, follow')
+          }
           if (options.contentSignal) {
             headers.set('Content-Signal', options.contentSignal)
           }
@@ -235,6 +246,7 @@ export function agentMarkdownMiddleware(
     } catch {
       return response
     }
+    if (isExcludedPath(options.excludePaths, htmlPath)) return response
 
     let htmlResponse: Response
     try {
@@ -247,8 +259,6 @@ export function agentMarkdownMiddleware(
     }
 
     const html = await htmlResponse.text()
-    // Only public pages get a Markdown twin.
-    if (isNoindexHtml(html)) return response
     const canonical =
       canonicalFromHtml(html) ?? new URL(htmlPath, baseUrl).toString()
 
@@ -285,6 +295,9 @@ export function agentMarkdownMiddleware(
     if (cacheControl) headers.set('Cache-Control', cacheControl)
     if (options.contentSignal) {
       headers.set('Content-Signal', options.contentSignal)
+    }
+    if (isNoindexHtml(html)) {
+      headers.set('X-Robots-Tag', 'noindex, follow')
     }
 
     return new Response(markdown, { headers, status: 200 })

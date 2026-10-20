@@ -29,10 +29,9 @@ async function fixtureDirectory(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'seo-astro-integration-'))
   await mkdir(join(directory, 'docs'), { recursive: true })
   await writeFile(join(directory, 'index.html'), page('/', 'Home'))
-  await writeFile(join(directory, 'docs', 'index.html'), page('/docs', 'Docs'))
   await writeFile(
-    join(directory, 'account.html'),
-    page('/account', 'Account', true),
+    join(directory, 'docs', 'index.html'),
+    page('/docs', 'Docs', true),
   )
   await writeFile(
     join(directory, 'old.html'),
@@ -97,14 +96,8 @@ test('writes one deterministic artifact for each public content page', async () 
       first.map((entry) => [entry.htmlPath, entry.markdownPath, entry.noindex]),
       [
         ['/', '/index.md', false],
-        ['/docs', '/docs.md', false],
+        ['/docs', '/docs.md', true],
       ],
-    )
-    // A noindex page is private: no twin and no alternate link.
-    await assert.rejects(readFile(join(directory, 'account.md')), /ENOENT/u)
-    assert.doesNotMatch(
-      await readFile(join(directory, 'account.html'), 'utf8'),
-      /type="text\/markdown"/u,
     )
     assert.equal(
       (
@@ -582,6 +575,29 @@ test('places default llms.txt inside the public Astro base', async () => {
       '<https://example.com/seo/llms.txt>; rel="describedby"',
     )
     assert.equal(headersForPath(headers, '/index.md').get('Content-Type'), null)
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
+})
+
+test('excludePaths gives signed-in routes no twin and no alternate link', async () => {
+  const directory = await fixtureDirectory()
+  try {
+    await writeFile(join(directory, 'account.html'), page('/account', 'Account'))
+    const pages = await writeAgentMarkdownArtifacts({
+      outputDir: directory,
+      site: 'https://example.com',
+      excludePaths: ['/account'],
+    })
+    assert.deepEqual(
+      pages.map((entry) => entry.htmlPath),
+      ['/', '/docs'],
+    )
+    await assert.rejects(readFile(join(directory, 'account.md')), /ENOENT/u)
+    assert.doesNotMatch(
+      await readFile(join(directory, 'account.html'), 'utf8'),
+      /type="text\/markdown"/u,
+    )
   } finally {
     await rm(directory, { force: true, recursive: true })
   }

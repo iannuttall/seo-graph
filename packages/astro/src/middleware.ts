@@ -157,6 +157,8 @@ export function agentMarkdownMiddleware(
         } catch {
           return response
         }
+        // Only public pages get a Markdown twin.
+        if (isNoindexHtml(html)) return response
         const canonical =
           canonicalFromHtml(html) ?? new URL(pathname, baseUrl).toString()
         try {
@@ -165,9 +167,6 @@ export function agentMarkdownMiddleware(
             const headers = new Headers(ownMarkdown.headers)
             mergeVary(headers, 'Accept')
             appendDiscoveryLinks(headers, { canonical, describedBy })
-            if (isNoindexHtml(html)) {
-              headers.set('X-Robots-Tag', 'noindex, follow')
-            }
             if (options.contentSignal) {
               headers.set('Content-Signal', options.contentSignal)
             }
@@ -191,9 +190,6 @@ export function agentMarkdownMiddleware(
           headers.set('X-Markdown-Tokens', String(rendered.tokenEstimate))
           mergeVary(headers, 'Accept')
           appendDiscoveryLinks(headers, { canonical, describedBy })
-          if (isNoindexHtml(html)) {
-            headers.set('X-Robots-Tag', 'noindex, follow')
-          }
           if (options.contentSignal) {
             headers.set('Content-Signal', options.contentSignal)
           }
@@ -251,6 +247,8 @@ export function agentMarkdownMiddleware(
     }
 
     const html = await htmlResponse.text()
+    // Only public pages get a Markdown twin.
+    if (isNoindexHtml(html)) return response
     const canonical =
       canonicalFromHtml(html) ?? new URL(htmlPath, baseUrl).toString()
 
@@ -287,9 +285,6 @@ export function agentMarkdownMiddleware(
     if (cacheControl) headers.set('Cache-Control', cacheControl)
     if (options.contentSignal) {
       headers.set('Content-Signal', options.contentSignal)
-    }
-    if (isNoindexHtml(html)) {
-      headers.set('X-Robots-Tag', 'noindex, follow')
     }
 
     return new Response(markdown, { headers, status: 200 })

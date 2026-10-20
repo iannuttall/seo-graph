@@ -19,6 +19,11 @@ export interface CloudflareMarkdownOptions {
   ignoredMarkdownPrefixes?: readonly string[]
   /** Public llms.txt path used for `rel="describedby"` discovery. */
   llmsTxtPath?: string | readonly string[]
+  /**
+   * Paths of pages that are not public. They get an X-Robots-Tag noindex
+   * header and no Markdown twin: the `.md` URL returns 404 and Accept:
+   * text/markdown returns the HTML.
+   */
   noindexPaths?: readonly string[]
   responseHeaders?: Readonly<Record<string, string>>
   site: string
@@ -205,6 +210,12 @@ export function createCloudflareMarkdownHandler(
         requestUrl.pathname,
         options.base,
       )
+      if (noindexPaths.has(htmlPath)) {
+        return withPolicyHeaders(
+          new Response('Not Found', { status: 404 }),
+          options,
+        )
+      }
       const result = await markdownResponse({
         canonical: canonicalUrl(site, htmlPath),
         contentSignal: options.contentSignal,
@@ -218,7 +229,10 @@ export function createCloudflareMarkdownHandler(
       })
     }
 
-    if (acceptsMarkdown(request.headers.get('Accept'))) {
+    if (
+      acceptsMarkdown(request.headers.get('Accept')) &&
+      !noindexPaths.has(requestUrl.pathname)
+    ) {
       const markdownUrl = new URL(request.url)
       markdownUrl.pathname = markdownRouteForPath(
         markdownUrl.pathname,
@@ -250,10 +264,12 @@ export function createCloudflareMarkdownHandler(
     }
 
     return responseWithHeaders(response, request, (headers) => {
-      appendLink(
-        headers,
-        `<${canonicalUrl(site, markdownRouteForPath(requestUrl.pathname, options.base).markdownPath)}>; rel="alternate"; type="text/markdown"`,
-      )
+      if (!noindexPaths.has(requestUrl.pathname)) {
+        appendLink(
+          headers,
+          `<${canonicalUrl(site, markdownRouteForPath(requestUrl.pathname, options.base).markdownPath)}>; rel="alternate"; type="text/markdown"`,
+        )
+      }
       const llmsUrl = describedBy(requestUrl.pathname)
       if (llmsUrl) {
         appendLink(headers, `<${llmsUrl}>; rel="describedby"`)

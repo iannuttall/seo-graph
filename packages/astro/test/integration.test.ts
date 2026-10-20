@@ -579,3 +579,26 @@ test('places default llms.txt inside the public Astro base', async () => {
     await rm(directory, { force: true, recursive: true })
   }
 })
+
+test('excludePaths gives signed-in routes no twin and no alternate link', async () => {
+  const directory = await fixtureDirectory()
+  try {
+    await writeFile(join(directory, 'account.html'), page('/account', 'Account'))
+    const pages = await writeAgentMarkdownArtifacts({
+      outputDir: directory,
+      site: 'https://example.com',
+      excludePaths: ['/account'],
+    })
+    assert.deepEqual(
+      pages.map((entry) => entry.htmlPath),
+      ['/', '/docs'],
+    )
+    await assert.rejects(readFile(join(directory, 'account.md')), /ENOENT/u)
+    assert.doesNotMatch(
+      await readFile(join(directory, 'account.html'), 'utf8'),
+      /type="text\/markdown"/u,
+    )
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
+})

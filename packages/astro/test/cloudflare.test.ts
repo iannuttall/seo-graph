@@ -376,3 +376,26 @@ test('uses the most specific llms.txt scope when several files apply', async () 
     /<https:\/\/example\.com\/llms\.txt>; rel="describedby"/u,
   )
 })
+
+test('excludePaths serves no Markdown for signed-in routes', async () => {
+  const excluded = createCloudflareMarkdownHandler({
+    excludePaths: ['/docs'],
+    site: 'https://example.com',
+  })
+  const markdown = await excluded(
+    new Request('https://example.com/docs.md'),
+    fixtureAssets(),
+  )
+  const negotiated = await excluded(
+    new Request('https://example.com/docs', {
+      headers: { Accept: 'text/markdown' },
+    }),
+    fixtureAssets(),
+  )
+  assert.equal(markdown.status, 404)
+  assert.match(negotiated.headers.get('Content-Type') ?? '', /text\/html/u)
+  assert.doesNotMatch(
+    negotiated.headers.get('Link') ?? '',
+    /type="text\/markdown"/u,
+  )
+})

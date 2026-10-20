@@ -2422,6 +2422,11 @@ export default defineConfig({
 Status and redirect pages are skipped. A noindex page keeps noindex on its
 Markdown response. The Markdown twin of a page shares its canonical URL.
 
+List signed-in routes in `excludePaths` (exact paths, or prefixes ending in
+`/*`). They get no Markdown twin and no alternate link, because a copy could
+show agents what a signed-out visitor cannot see. `agentMarkdownMiddleware()`
+and the Cloudflare handler take the same option.
+
 `cloudflareHeaders` controls the build's `_headers` output:
 
 - Omitted or `true` (default): one `/*.md` rule with `! Vary`,
@@ -2551,7 +2556,7 @@ const markdown = createCloudflareMarkdownHandler({
 It does full RFC 9110 Accept parsing (q-values, specificity; `q=0` refuses
 markdown, `*/*` gets HTML), adds `Vary: Accept`, canonical/alternate `Link`
 headers, `X-Markdown-Tokens`, your `Content-Signal`, and preserves noindex
-as `X-Robots-Tag`. Options: `base`, `canonicalHosts`, `noindexPaths`,
+as `X-Robots-Tag`. Options: `base`, `canonicalHosts`, `excludePaths`, `noindexPaths`,
 `ignoredMarkdownPrefixes`, `llmsTxtPath`, `responseHeaders`.
 
 ## Schema endpoints and the schema map

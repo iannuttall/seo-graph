@@ -24,6 +24,7 @@ import {
   sha256,
 } from '@iannuttall/seo-graph-core'
 import { renderAgentMarkdown } from '@iannuttall/seo-graph-core'
+import { isExcludedPath } from './exclude-paths.js'
 import { assertNoRouteCollisions, markdownRouteForPath } from '@iannuttall/seo-graph-core'
 
 export interface AgentLlmsTxtOptions extends LlmsTxtConfig {
@@ -38,6 +39,11 @@ export interface AgentLlmsFullTxtOptions {
 
 export interface AgentMarkdownIntegrationOptions {
   excludeSelectors?: readonly string[]
+  /**
+   * Page paths that get no Markdown twin and no alternate link, such as
+   * signed-in routes. Exact paths or prefixes ending in `/*`.
+   */
+  excludePaths?: readonly string[]
   manifestFile?: string
   /** One llms.txt file, or several scoped files. The most specific scope wins. */
   llmsTxt?: AgentLlmsTxtOptions | readonly AgentLlmsTxtOptions[]
@@ -190,6 +196,7 @@ const HEADERS_MARKER =
 export async function writeAgentMarkdownArtifacts(input: {
   base?: string
   excludeSelectors?: readonly string[]
+  excludePaths?: readonly string[]
   manifestFile?: string
   llmsTxt?: AgentLlmsTxtOptions | readonly AgentLlmsTxtOptions[]
   llmsFullTxt?: boolean | AgentLlmsFullTxtOptions
@@ -237,6 +244,7 @@ export async function writeAgentMarkdownArtifacts(input: {
     }
     const canonical = new URL(canonicalValue, site)
     assertCanonicalSite(canonical, site)
+    if (isExcludedPath(input.excludePaths, canonical.pathname)) continue
     const route = markdownRouteForPath(canonical.pathname, input.base)
     const markdownFile = resolve(outputDir, route.filePath)
     if (!markdownFile.startsWith(`${outputDir}${sep}`)) {
@@ -491,6 +499,7 @@ export function agentMarkdown(
         const pages = await writeAgentMarkdownArtifacts({
           base: config.base,
           excludeSelectors: options.excludeSelectors,
+          excludePaths: options.excludePaths,
           manifestFile: options.manifestFile,
           llmsTxt: options.llmsTxt,
           llmsFullTxt: options.llmsFullTxt,

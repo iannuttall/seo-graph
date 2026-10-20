@@ -5,6 +5,7 @@ import {
   markdownRouteForPath,
   parseAccept,
 } from '@iannuttall/seo-graph-core'
+import { isExcludedPath } from './exclude-paths.js'
 
 export { acceptsMarkdown, parseAccept }
 
@@ -20,6 +21,12 @@ export interface CloudflareMarkdownOptions {
   /** Public llms.txt path used for `rel="describedby"` discovery. */
   llmsTxtPath?: string | readonly string[]
   noindexPaths?: readonly string[]
+  /**
+   * Page paths that get no Markdown twin and no alternate link, such as
+   * signed-in routes. Exact paths or prefixes ending in `/*`. The `.md` URL
+   * returns 404 and `Accept: text/markdown` returns the HTML.
+   */
+  excludePaths?: readonly string[]
   responseHeaders?: Readonly<Record<string, string>>
   site: string
 }
@@ -205,6 +212,12 @@ export function createCloudflareMarkdownHandler(
         requestUrl.pathname,
         options.base,
       )
+      if (isExcludedPath(options.excludePaths, htmlPath)) {
+        return withPolicyHeaders(
+          new Response('Not Found', { status: 404 }),
+          options,
+        )
+      }
       const result = await markdownResponse({
         canonical: canonicalUrl(site, htmlPath),
         contentSignal: options.contentSignal,
@@ -218,7 +231,8 @@ export function createCloudflareMarkdownHandler(
       })
     }
 
-    if (acceptsMarkdown(request.headers.get('Accept'))) {
+    const excluded = isExcludedPath(options.excludePaths, requestUrl.pathname)
+    if (!excluded && acceptsMarkdown(request.headers.get('Accept'))) {
       const markdownUrl = new URL(request.url)
       markdownUrl.pathname = markdownRouteForPath(
         markdownUrl.pathname,
@@ -250,10 +264,12 @@ export function createCloudflareMarkdownHandler(
     }
 
     return responseWithHeaders(response, request, (headers) => {
-      appendLink(
-        headers,
-        `<${canonicalUrl(site, markdownRouteForPath(requestUrl.pathname, options.base).markdownPath)}>; rel="alternate"; type="text/markdown"`,
-      )
+      if (!excluded) {
+        appendLink(
+          headers,
+          `<${canonicalUrl(site, markdownRouteForPath(requestUrl.pathname, options.base).markdownPath)}>; rel="alternate"; type="text/markdown"`,
+        )
+      }
       const llmsUrl = describedBy(requestUrl.pathname)
       if (llmsUrl) {
         appendLink(headers, `<${llmsUrl}>; rel="describedby"`)

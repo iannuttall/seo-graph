@@ -271,7 +271,7 @@ test('uses the full representation size for explicit and negotiated ranges', asy
   }
 })
 
-test('keeps noindex pages private, real 404s and non-page Markdown assets', async () => {
+test('preserves noindex, real 404s and non-page Markdown assets', async () => {
   const assets = fixtureAssets()
   const privacy = await handler()(
     new Request('https://example.com/privacy.md'),
@@ -292,13 +292,8 @@ test('keeps noindex pages private, real 404s and non-page Markdown assets', asyn
     assets,
   )
 
-  // A noindex page gets no Markdown twin and no alternate link.
-  assert.equal(privacy.status, 404)
+  assert.equal(privacy.headers.get('X-Robots-Tag'), 'noindex, follow')
   assert.equal(privacyHtml.headers.get('X-Robots-Tag'), 'noindex, follow')
-  assert.doesNotMatch(
-    privacyHtml.headers.get('Link') ?? '',
-    /type="text\/markdown"/u,
-  )
   assert.equal(missing.status, 404)
   assert.equal(missing.headers.get('Link'), null)
   assert.equal(skill.headers.get('Link'), null)

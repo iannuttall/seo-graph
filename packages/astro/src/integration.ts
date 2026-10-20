@@ -231,9 +231,6 @@ export async function writeAgentMarkdownArtifacts(input: {
 
     const html = await readFile(htmlFile, 'utf8')
     if (isRedirectHtml(html)) continue
-    // Only public pages get a Markdown twin. A noindex page (a signed-in
-    // view, a preview, a private route) gets no twin and no alternate link.
-    if (isNoindexHtml(html)) continue
     const canonicalValue = canonicalFromHtml(html)
     if (!canonicalValue) {
       throw new Error(`Missing canonical in ${relativeHtmlFile}`)
@@ -271,7 +268,7 @@ export async function writeAgentMarkdownArtifacts(input: {
         language: rendered.metadata.language,
         markdownFile: outputRelativePath(outputDir, markdownFile),
         markdownPath: route.markdownPath,
-        noindex: false,
+        noindex: isNoindexHtml(html),
         sha256: sha256(rendered.markdown),
         title: rendered.metadata.title,
         tokens: rendered.tokenEstimate,

@@ -29,9 +29,10 @@ async function fixtureDirectory(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'seo-astro-integration-'))
   await mkdir(join(directory, 'docs'), { recursive: true })
   await writeFile(join(directory, 'index.html'), page('/', 'Home'))
+  await writeFile(join(directory, 'docs', 'index.html'), page('/docs', 'Docs'))
   await writeFile(
-    join(directory, 'docs', 'index.html'),
-    page('/docs', 'Docs', true),
+    join(directory, 'account.html'),
+    page('/account', 'Account', true),
   )
   await writeFile(
     join(directory, 'old.html'),
@@ -96,8 +97,14 @@ test('writes one deterministic artifact for each public content page', async () 
       first.map((entry) => [entry.htmlPath, entry.markdownPath, entry.noindex]),
       [
         ['/', '/index.md', false],
-        ['/docs', '/docs.md', true],
+        ['/docs', '/docs.md', false],
       ],
+    )
+    // A noindex page is private: no twin and no alternate link.
+    await assert.rejects(readFile(join(directory, 'account.md')), /ENOENT/u)
+    assert.doesNotMatch(
+      await readFile(join(directory, 'account.html'), 'utf8'),
+      /type="text\/markdown"/u,
     )
     assert.equal(
       (

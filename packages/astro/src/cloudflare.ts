@@ -125,7 +125,7 @@ async function markdownResponse(input: {
   response: Response
 }): Promise<Response> {
   const headers = new Headers(input.response.headers)
-  const body =
+  let body: BodyInit | null =
     input.response.status === 304 || input.request.method === 'HEAD'
       ? null
       : input.response.body
@@ -137,13 +137,16 @@ async function markdownResponse(input: {
   }
   if (!headers.has('X-Markdown-Tokens')) {
     const contentRange = headers.get('Content-Range')
-    const rangeTotal = contentRange?.match(/\/(\d+)$/u)?.[1]
-    const byteLength = Number(
-      rangeTotal ??
-        (input.response.status === 304
-          ? Number.NaN
-          : headers.get('Content-Length')),
-    )
+    const knownLength =
+      contentRange?.match(/\/(\d+)$/u)?.[1] ??
+      (input.response.status === 304 ? null : headers.get('Content-Length'))
+    let byteLength = knownLength === null ? Number.NaN : Number(knownLength)
+    // Without a length, only a complete 200 body can be measured. Markdown
+    // twins are small, so buffering it is cheap.
+    if (knownLength === null && input.response.status === 200 && body) {
+      body = await input.response.arrayBuffer()
+      byteLength = body.byteLength
+    }
     if (Number.isSafeInteger(byteLength) && byteLength >= 0) {
       headers.set('X-Markdown-Tokens', String(Math.ceil(byteLength / 4)))
     }

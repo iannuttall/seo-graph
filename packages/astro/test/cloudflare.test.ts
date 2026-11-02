@@ -271,6 +271,34 @@ test('uses the full representation size for explicit and negotiated ranges', asy
   }
 })
 
+test('counts Markdown tokens from the body when assets omit Content-Length', async () => {
+  // wrangler dev can return assets without Content-Length or a token header.
+  const body = '# Café\n\nA page whose length is known only from its body.\n'
+  const assets = {
+    async fetch(request: Request) {
+      return new Response(request.method === 'HEAD' ? null : body, {
+        headers: { 'Content-Type': 'text/markdown' },
+      })
+    },
+  }
+  const expected = String(Math.ceil(Buffer.byteLength(body) / 4))
+  for (const [url, accept] of [
+    ['https://example.com/docs.md', undefined],
+    ['https://example.com/docs', 'text/markdown'],
+  ] as const) {
+    const headers = new Headers(accept ? { Accept: accept } : {})
+    const get = await handler()(new Request(url, { headers }), assets)
+    assert.equal(get.headers.get('X-Markdown-Tokens'), expected, url)
+    assert.equal(await get.text(), body)
+
+    const head = await handler()(
+      new Request(url, { headers, method: 'HEAD' }),
+      assets,
+    )
+    assert.equal(head.headers.get('X-Markdown-Tokens'), null, url)
+  }
+})
+
 test('preserves noindex, real 404s and non-page Markdown assets', async () => {
   const assets = fixtureAssets()
   const privacy = await handler()(

@@ -40,13 +40,13 @@
   "dependencies": {
     "@iannuttall/seo-graph-core": "workspace:*",
     "schema-dts": "^2.0.0",
-    "zod": "^4.4.3"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/node": "22.20.1",
-    "astro": "7.3.3",
+    "astro": "7.4.7",
     "typescript": "6.0.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.11"
   },
   "author": "Ian Nuttall",
   "repository": {
